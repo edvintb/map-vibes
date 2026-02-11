@@ -1,0 +1,17 @@
+# Data files (download with: python download_data.py)
+data/
+
+# Generated images
+images/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# Claude Code
+.claude/
+
+# macOS
+.DS_Store
