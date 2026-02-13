@@ -8,6 +8,12 @@ Renders a high-resolution terrain map combining:
   - Contour lines at multiple intervals
 """
 
+import os, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+os.chdir(Path(__file__).resolve().parent.parent)
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt

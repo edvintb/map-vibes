@@ -622,17 +622,3 @@ def visualize_streets_by_type(streets_data: StreetsData, street_type: str,
         color_by='single',
         **kwargs
     )
-
-
-if __name__ == "__main__":
-    with open('data/sf_streets.json', 'r') as f:
-        streets_data = load_streets_from_json(json.load(f))
-
-    print(f"Loaded {len(streets_data.streets)} street segments")
-
-    if streets_data.streets:
-        first_street = streets_data.streets[0]
-        print(f"First street: {first_street.streetname} ({first_street.street} {first_street.st_type})")
-        print(f"Neighborhood: {first_street.nhood}")
-        if first_street.line:
-            print(f"Coordinates: {len(first_street.line.coordinates)} points")

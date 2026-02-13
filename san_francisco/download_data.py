@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Download all data files required by make_poster.py into data/.
+"""Download all data files required by make_map.py into data/.
 
 Data sources:
   - SF Open Data (Socrata API): neighborhoods, streets, elevation, parks
-  - USGS 3DEP ImageServer: 10 m DEM covering SF + Marin + San Mateo
+  - USGS 3DEP ImageServer: 10 m DEM covering SF + surrounding area
 
 Usage:
-    python download_data.py          # download everything
-    python download_data.py --skip-dem  # skip the large DEM download
+    python download_data.py              # download everything
+    python download_data.py --skip-dem   # skip the large DEM download
+    python download_data.py --extent 0.4 # download a wider area
+
+Downloads a generous DEM area at native USGS 1/3 arc-second resolution
+(10800 px/degree). The make_map script crops to the desired view.
 """
 
 import argparse
@@ -20,6 +24,14 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 DATA_DIR = "data"
+
+# USGS 1/3 arc-second native resolution
+PIXELS_PER_DEGREE = 10800
+
+# City-specific defaults
+CENTER_LON = -122.435
+CENTER_LAT = 37.785
+DEFAULT_EXTENT = 0.23  # degrees per side — ~26 km at native 10800 px/deg
 
 # ---------------------------------------------------------------------------
 # SF Open Data datasets (Socrata API)
@@ -41,6 +53,22 @@ SF_OPEN_DATA = {
     "sf_streets.json": {
         "dataset_id": "3psu-pn9h",
         "description": "SF Street Centerlines (17,000+ segments)",
+    },
+    "sf_zoning.json": {
+        "dataset_id": "3i4a-hu95",
+        "description": "SF Zoning Districts (polygons with zoning codes + gen category)",
+    },
+    "sf_zoning_height.json": {
+        "dataset_id": "kxax-c386",
+        "description": "SF Height and Bulk Districts",
+    },
+    "sf_zoning_special.json": {
+        "dataset_id": "ry69-hnut",
+        "description": "SF Special Use Districts",
+    },
+    "sf_land_use.json": {
+        "dataset_id": "ygi5-84iq",
+        "description": "SF Land Use 2020 (parcel-level)",
     },
 }
 
@@ -69,38 +97,37 @@ def download_sf_open_data():
 
 
 # ---------------------------------------------------------------------------
-# USGS 3DEP DEM (10 m resolution)
+# USGS 3DEP DEM
 # ---------------------------------------------------------------------------
 
-# Bounding box covering SF + Marin County + San Mateo County + islands
-DEM_BBOX = {
-    "xmin": -122.52,
-    "ymin": 37.70,
-    "xmax": -122.35,
-    "ymax": 37.87,
-}
-DEM_SIZE = 1850  # pixels per side
+def download_dem(center_lon, center_lat, extent):
+    """Download DEM from USGS 3DEP ImageServer.
 
-
-def download_dem():
-    """Download 10 m DEM from USGS 3DEP ImageServer.
-
-    Covers San Francisco, Marin Headlands, Angel Island, Tiburon,
-    Alcatraz, and northern San Mateo County.
+    Downloads a square area of `extent` degrees per side, centered on
+    (center_lon, center_lat), at native USGS 1/3 arc-second resolution.
     """
     path = os.path.join(DATA_DIR, "sf_dem_10m_marin.tif")
     if os.path.exists(path):
         logger.info("  sf_dem_10m_marin.tif already exists, skipping")
         return
 
-    logger.info("  Downloading USGS 3DEP 10m DEM...")
-    bbox = DEM_BBOX
+    half = extent / 2
+    xmin = center_lon - half
+    ymin = center_lat - half
+    xmax = center_lon + half
+    ymax = center_lat + half
+    dem_width = round(extent * PIXELS_PER_DEGREE)
+    dem_height = round(extent * PIXELS_PER_DEGREE)
+
+    logger.info(f"  DEM: {dem_width} x {dem_height} px, "
+                f"bbox: ({xmin:.3f}, {ymin:.3f}) to ({xmax:.3f}, {ymax:.3f})")
+    logger.info("  Downloading USGS 3DEP DEM...")
     url = (
         "https://elevation.nationalmap.gov/arcgis/rest/services/"
         "3DEPElevation/ImageServer/exportImage"
-        f"?bbox={bbox['xmin']},{bbox['ymin']},{bbox['xmax']},{bbox['ymax']}"
+        f"?bbox={xmin},{ymin},{xmax},{ymax}"
         f"&bboxSR=4326&imageSR=4326"
-        f"&size={DEM_SIZE},{DEM_SIZE}"
+        f"&size={dem_width},{dem_height}"
         f"&format=tiff&pixelType=F32&noData=-9999"
         f"&interpolation=+RSP_BilinearInterpolation"
         f"&f=image"
@@ -115,9 +142,18 @@ def download_dem():
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Download data for SF poster map")
+    parser = argparse.ArgumentParser(
+        description="Download data for SF poster map",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--center-lon", type=float, default=CENTER_LON,
+                        help=f"DEM center longitude (default: {CENTER_LON})")
+    parser.add_argument("--center-lat", type=float, default=CENTER_LAT,
+                        help=f"DEM center latitude (default: {CENTER_LAT})")
+    parser.add_argument("--extent", type=float, default=DEFAULT_EXTENT,
+                        help=f"DEM extent in degrees per side (default: {DEFAULT_EXTENT})")
     parser.add_argument("--skip-dem", action="store_true",
-                        help="Skip the large DEM download (~13 MB)")
+                        help="Skip the large DEM download")
     args = parser.parse_args()
 
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -127,7 +163,7 @@ def main():
 
     if not args.skip_dem:
         logger.info("Downloading USGS 3DEP DEM...")
-        download_dem()
+        download_dem(args.center_lon, args.center_lat, args.extent)
     else:
         logger.info("Skipping DEM download (--skip-dem)")
 

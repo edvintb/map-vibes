@@ -519,26 +519,355 @@ def visualize_elevation_by_type(elevation_data: ElevationData,
     )
 
 
-if __name__ == "__main__":
-    try:
-        elevation_data = load_elevation_from_file('data/sf_elevation.json')
-        logger.info(f"Loaded {len(elevation_data.isolines)} elevation isolines")
+def _darken_hex(hex_color: str, factor: float = 0.55):
+    """Darken a hex color by multiplying RGB channels."""
+    h = hex_color.lstrip('#')
+    r, g, b = (int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+    return (r * factor, g * factor, b * factor)
 
-        min_elev, max_elev = elevation_data.get_elevation_range()
-        logger.info(f"Elevation range: {min_elev} to {max_elev}")
-        logger.info(f"Isoline types: {elevation_data.get_isoline_types()}")
 
-        fig = visualize_elevation_data(
-            elevation_data,
-            figsize=(14, 11),
-            color_by='elevation',
-            title="San Francisco Elevation Contours",
-            save_path="images/sf_elevation_contours.png"
-        )
-        create_elevation_legend(fig.axes[0], 'elevation')
-        plt.show()
+def _elevation_tint(hex_color: str, t: float):
+    """Map a neighborhood color through an elevation gradient.
 
-    except FileNotFoundError:
-        logger.error("sf_elevation.json not found.")
-    except Exception as e:
-        logger.error(f"Error: {e}")
+    t=0 (low elevation): light, desaturated
+    t=1 (high elevation): dark, saturated
+    """
+    import colorsys
+    h_hex = hex_color.lstrip('#')
+    r, g, b = (int(h_hex[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    return colorsys.hls_to_rgb(h, 0.68 - 0.53 * t, 0.40 + 0.45 * t)
+
+
+def _extract_line_coords(geom):
+    """Extract coordinate lists from a Shapely geometry."""
+    from shapely.geometry import LineString, MultiLineString
+    if geom.is_empty:
+        return []
+    if isinstance(geom, LineString):
+        return [list(geom.coords)] if len(geom.coords) >= 2 else []
+    if isinstance(geom, MultiLineString):
+        return [list(line.coords) for line in geom.geoms if len(line.coords) >= 2]
+    if hasattr(geom, 'geoms'):
+        result = []
+        for sub in geom.geoms:
+            result.extend(_extract_line_coords(sub))
+        return result
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Unified contour color index builders
+# ---------------------------------------------------------------------------
+
+def build_contour_color_index_from_neighborhoods(
+    names: list, polys: list, tree, neighborhood_color_map: dict,
+):
+    """Wrap neighborhood data into the unified color index format.
+
+    Returns (hex_colors, polys, tree) where hex_colors[i] is the color
+    for polys[i].
+    """
+    hex_colors = [neighborhood_color_map.get(name, '#808080') for name in names]
+    return (hex_colors, polys, tree)
+
+
+def build_contour_color_index_from_color_source(color_source: dict):
+    """Flatten a color_source dict into the unified color index format.
+
+    color_source is {hex_color: [shapely_geom, ...]}.  Returns
+    (hex_colors, all_polys, tree) with a new STRtree built from all geometries.
+    """
+    from shapely.strtree import STRtree
+
+    hex_colors = []
+    all_polys = []
+    for hex_color, geom_list in color_source.items():
+        for geom in geom_list:
+            if not geom.is_empty:
+                hex_colors.append(hex_color)
+                all_polys.append(geom)
+    tree = STRtree(all_polys)
+    return (hex_colors, all_polys, tree)
+
+
+# ---------------------------------------------------------------------------
+# Unified contour line renderer
+# ---------------------------------------------------------------------------
+
+def add_contour_lines(
+    ax: Axes,
+    elevation_data: ElevationData,
+    color_index,
+    *,
+    contour_interval: float = 10.0,
+    major_interval: float = 50.0,
+    linewidth: float = 0.35,
+    major_linewidth: float = 0.8,
+    alpha: float = 0.45,
+    show_minor: bool = True,
+    show_major: bool = True,
+    color_override: Optional[str] = None,
+    contour_style: str = "darken",
+    gap_color: Optional[str] = "#B8B7B5",
+    clip_boundary=None,
+):
+    """Draw elevation contour lines colored by a unified color index.
+
+    The color index is a (hex_colors, polys, tree) tuple from either
+    build_contour_color_index_from_neighborhoods() or
+    build_contour_color_index_from_color_source().
+
+    Each isoline is clipped to polygons via STRtree intersection and colored
+    based on the polygon's assigned color, darkened or tinted by elevation.
+    Gaps between polygons are filled with gap_color (default: gray matching
+    the surrounding hillshade).
+    """
+    from shapely.geometry import LineString
+
+    if not show_minor and not show_major:
+        return
+
+    hex_colors, polys, tree = color_index
+
+    min_elev, max_elev = elevation_data.get_elevation_range()
+    elev_span = (max_elev - min_elev) if (max_elev and min_elev and max_elev > min_elev) else 1.0
+
+    # Filter isolines by interval
+    filtered = []
+    for isoline in elevation_data.isolines:
+        elev = isoline.elevation_value
+        if elev is None or len(isoline.coordinates) < 2:
+            continue
+        remainder = abs(elev % contour_interval)
+        if remainder > 0.5 and abs(remainder - contour_interval) > 0.5:
+            continue
+        filtered.append(isoline)
+
+    if not filtered:
+        logger.info("  No contour lines after filtering")
+        return
+
+    logger.info(f"  Processing {len(filtered)} contour lines "
+                f"(interval={contour_interval}m, major={major_interval}m)...")
+
+    lines_minor, colors_minor, lw_minor = [], [], []
+    lines_major, colors_major, lw_major = [], [], []
+
+    for i, isoline in enumerate(filtered):
+        if (i + 1) % 2000 == 0:
+            logger.info(f"    Processed {i + 1}/{len(filtered)} isolines...")
+
+        coords = isoline.coordinates
+        elev = isoline.elevation_value or 0.0
+        t = max(0.0, min(1.0, (elev - min_elev) / elev_span))
+
+        is_major = (abs(elev % major_interval) < 0.5) or \
+                   (abs(elev % major_interval - major_interval) < 0.5)
+
+        if is_major and not show_major:
+            continue
+        if not is_major and not show_minor:
+            continue
+
+        lw = linewidth + 0.2 * t
+        if is_major:
+            lw = major_linewidth + 0.3 * t
+
+        line = LineString(coords)
+
+        # Clip to city boundary if provided
+        if clip_boundary is not None:
+            try:
+                line = line.intersection(clip_boundary)
+                if line.is_empty:
+                    continue
+            except Exception:
+                continue
+            # Update coords for color_override path
+            clipped_segments = _extract_line_coords(line)
+            if not clipped_segments:
+                continue
+        else:
+            clipped_segments = None
+
+        if color_override is not None:
+            # Single color mode — no spatial lookup needed
+            if contour_style == 'darken':
+                darken_factor = 0.7 - 0.4 * t
+                if is_major:
+                    darken_factor *= 0.75
+                rgb = _darken_hex(color_override, darken_factor)
+            else:
+                rgb = _elevation_tint(color_override, t)
+            for seg in (clipped_segments if clipped_segments else [coords]):
+                if is_major:
+                    lines_major.append(seg)
+                    colors_major.append(rgb)
+                    lw_major.append(lw)
+                else:
+                    lines_minor.append(seg)
+                    colors_minor.append(rgb)
+                    lw_minor.append(lw)
+            continue
+
+        # Spatial lookup — clip to polygons and collect covered geometry
+        candidate_indices = tree.query(line)
+
+        covered_geoms = []
+        for idx in candidate_indices:
+            try:
+                intersection = line.intersection(polys[idx])
+                segments = _extract_line_coords(intersection)
+                if not segments:
+                    continue
+                covered_geoms.append(intersection)
+                hex_color = hex_colors[idx]
+                if contour_style == 'darken':
+                    darken_factor = 0.7 - 0.4 * t
+                    if is_major:
+                        darken_factor *= 0.75
+                    rgb = _darken_hex(hex_color, darken_factor)
+                else:
+                    rgb = _elevation_tint(hex_color, t)
+                for seg in segments:
+                    if is_major:
+                        lines_major.append(seg)
+                        colors_major.append(rgb)
+                        lw_major.append(lw)
+                    else:
+                        lines_minor.append(seg)
+                        colors_minor.append(rgb)
+                        lw_minor.append(lw)
+            except Exception:
+                continue
+
+        # Gap segments: uncovered portions of the isoline
+        if gap_color is not None and covered_geoms:
+            try:
+                from shapely.ops import unary_union
+                covered = unary_union(covered_geoms)
+                gap_geom = line.difference(covered)
+                gap_segments = _extract_line_coords(gap_geom)
+                if gap_segments:
+                    gap_rgb = _darken_hex(gap_color, 0.5 - 0.3 * t)
+                    for seg in gap_segments:
+                        if is_major:
+                            lines_major.append(seg)
+                            colors_major.append(gap_rgb)
+                            lw_major.append(lw)
+                        else:
+                            lines_minor.append(seg)
+                            colors_minor.append(gap_rgb)
+                            lw_minor.append(lw)
+            except Exception:
+                pass
+        elif gap_color is not None and not covered_geoms:
+            # Entire isoline is in a gap — render it all in gap color
+            gap_rgb = _darken_hex(gap_color, 0.5 - 0.3 * t)
+            if is_major:
+                lines_major.append(coords)
+                colors_major.append(gap_rgb)
+                lw_major.append(lw)
+            else:
+                lines_minor.append(coords)
+                colors_minor.append(gap_rgb)
+                lw_minor.append(lw)
+
+    logger.info(f"  Drawing {len(lines_minor)} minor + {len(lines_major)} major contour segments...")
+    if lines_minor:
+        lc = LineCollection(lines_minor, colors=colors_minor, linewidths=lw_minor,
+                            alpha=alpha, zorder=5)
+        ax.add_collection(lc)
+    if lines_major:
+        lc = LineCollection(lines_major, colors=colors_major, linewidths=lw_major,
+                            alpha=min(1.0, alpha * 1.8), zorder=6)
+        ax.add_collection(lc)
+
+
+# ---------------------------------------------------------------------------
+# Legacy contour renderer (kept for backward compatibility)
+# ---------------------------------------------------------------------------
+
+def add_neighborhood_contours(ax: Axes, elevation_data: ElevationData,
+                              names: list, polys: list, tree,
+                              neighborhood_color_map: dict,
+                              contour_style: str = "darken",
+                              linewidth: float = 0.35,
+                              alpha: float = 0.8,
+                              major_interval: float = 50.0):
+    """Draw elevation contour lines colored per-neighborhood.
+
+    Each isoline is clipped to neighborhood polygons and colored based on
+    the neighborhood's assigned color, darkened or tinted by elevation.
+    """
+    from shapely.geometry import LineString
+
+    min_elev, max_elev = elevation_data.get_elevation_range()
+    elev_span = (max_elev - min_elev) if (max_elev and min_elev and max_elev > min_elev) else 1.0
+
+    lines_minor, colors_minor, lw_minor = [], [], []
+    lines_major, colors_major, lw_major = [], [], []
+
+    if linewidth <= 0:
+        logger.info("  Skipping contour lines (linewidth=0)")
+        return
+
+    logger.info("  Intersecting isolines with neighborhoods...")
+    total = len(elevation_data.isolines)
+
+    for i, isoline in enumerate(elevation_data.isolines):
+        if (i + 1) % 2000 == 0:
+            logger.info(f"    Processed {i + 1}/{total} isolines...")
+
+        coords = isoline.coordinates
+        if len(coords) < 2:
+            continue
+
+        elev = isoline.elevation_value or 0.0
+        t = max(0.0, min(1.0, (elev - min_elev) / elev_span))
+
+        is_major = (abs(elev % major_interval) < 0.5) or \
+                   (abs(elev % major_interval - major_interval) < 0.5)
+
+        lw = linewidth + 0.2 * t
+        if is_major:
+            lw = linewidth * 2.2 + 0.3 * t
+
+        line = LineString(coords)
+        candidate_indices = tree.query(line)
+
+        for idx in candidate_indices:
+            try:
+                intersection = line.intersection(polys[idx])
+                segments = _extract_line_coords(intersection)
+                if segments:
+                    hex_color = neighborhood_color_map.get(names[idx], '#808080')
+                    if contour_style == 'darken':
+                        darken_factor = 0.7 - 0.4 * t
+                        if is_major:
+                            darken_factor *= 0.75
+                        rgb = _darken_hex(hex_color, darken_factor)
+                    else:
+                        rgb = _elevation_tint(hex_color, t)
+                    for seg in segments:
+                        if is_major:
+                            lines_major.append(seg)
+                            colors_major.append(rgb)
+                            lw_major.append(lw)
+                        else:
+                            lines_minor.append(seg)
+                            colors_minor.append(rgb)
+                            lw_minor.append(lw)
+            except Exception:
+                continue
+
+    logger.info(f"  Drawing {len(lines_minor)} minor + {len(lines_major)} major contour segments...")
+    if lines_minor:
+        lc = LineCollection(lines_minor, colors=colors_minor, linewidths=lw_minor,
+                            alpha=alpha, zorder=5)
+        ax.add_collection(lc)
+    if lines_major:
+        lc = LineCollection(lines_major, colors=colors_major, linewidths=lw_major,
+                            alpha=min(1.0, alpha * 1.8), zorder=6)
+        ax.add_collection(lc)

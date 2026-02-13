@@ -177,77 +177,74 @@ def find_adjacent_neighborhoods(neighborhoods: List[Neighborhood], logger=None) 
     return adjacency_dict
 
 def color_neighborhoods_greedy(adjacency_dict: Dict[int, List[int]], num_neighborhoods: int,
-                             force_more_colors: bool = False, max_colors: Optional[int] = None, logger=None) -> List[int]:
+                             force_more_colors: bool = False, max_colors: Optional[int] = None,
+                             logger=None, seed: int = 0) -> List[int]:
     """
-    Color neighborhoods using a greedy graph coloring algorithm.
+    Color neighborhoods using randomized graph coloring.
+    Processes neighborhoods in random order and assigns a random valid color.
     Returns a list where index i contains the color number for neighborhood i.
 
     Args:
         adjacency_dict: Dictionary mapping neighborhood indices to their adjacent neighbors
         num_neighborhoods: Total number of neighborhoods
-        force_more_colors: If True, try to use more colors for better visual distinction
+        force_more_colors: Ignored (kept for API compatibility)
         max_colors: Maximum number of colors to use (None for unlimited)
         logger: Logger instance to use for output
+        seed: Random seed for reproducibility
     """
+    import random
     if logger is None:
         logger = logging.getLogger('sf_neighborhood')
 
     logger.info("🎨 Applying graph coloring algorithm...")
 
+    rng = random.Random(seed)
+    n_colors = max_colors if max_colors else min(8, max(5, num_neighborhoods // 4))
+
     # Initialize all neighborhoods as uncolored (-1)
     colors = [-1] * num_neighborhoods
 
-    # Color the first neighborhood with color 0
-    colors[0] = 0
+    # Process neighborhoods in random order
+    order = list(range(num_neighborhoods))
+    rng.shuffle(order)
 
-    # Color remaining neighborhoods
-    for i in range(1, num_neighborhoods):
+    for i in order:
         # Get colors of adjacent neighborhoods
         adjacent_colors = set()
-        for adj_neighbor in adjacency_dict[i]:
-            if colors[adj_neighbor] != -1:
-                adjacent_colors.add(colors[adj_neighbor])
+        for adj in adjacency_dict[i]:
+            if colors[adj] != -1:
+                adjacent_colors.add(colors[adj])
 
-        if force_more_colors and max_colors is None:
-            # Try to use more colors but cap at 10 for natural palette aesthetic
-            max_colors_to_try = min(10, num_neighborhoods // 8)  # Cap at 10 colors, more conservative
-            current_max_color = max(colors[j] for j in range(i) if colors[j] != -1)
+        # Collect valid colors (not used by neighbors)
+        valid = [c for c in range(n_colors) if c not in adjacent_colors]
 
-            # If we can still add more colors and it would improve visual distinction
-            if current_max_color < max_colors_to_try:
-                # Check if using a new color would be beneficial
-                # (i.e., if many neighbors are using low-numbered colors)
-                low_color_neighbors = sum(1 for adj in adjacency_dict[i]
-                                        if colors[adj] != -1 and colors[adj] <= current_max_color // 2)
+        if valid:
+            colors[i] = rng.choice(valid)
+        else:
+            # All colors conflict — pick least-used among all colors
+            color_counts = [0] * n_colors
+            for c in colors:
+                if 0 <= c < n_colors:
+                    color_counts[c] += 1
+            colors[i] = min(range(n_colors), key=lambda c: color_counts[c])
 
-                if low_color_neighbors >= 3:  # Require more neighbors to justify new color
-                    colors[i] = current_max_color + 1
-                    continue
-
-        # Find the smallest color not used by adjacent neighborhoods
-        color = 0
-        while color in adjacent_colors:
-            color += 1
-            # If we have a max_colors constraint and we've exceeded it,
-            # we need to reuse colors (this might violate adjacency but is the best we can do)
-            if max_colors is not None and color >= max_colors:
-                # Find the least used color among available colors
-                color_counts = [0] * max_colors
-                for j in range(i):
-                    if colors[j] < max_colors:
-                        color_counts[colors[j]] += 1
-
-                # Try colors in order of least usage, avoiding adjacent ones
-                for attempt_color in sorted(range(max_colors), key=lambda c: color_counts[c]):
-                    if attempt_color not in adjacent_colors:
-                        color = attempt_color
+    # Repair any conflicts from the greedy fallback
+    for _ in range(100):
+        conflicts = False
+        for i in range(num_neighborhoods):
+            for adj in adjacency_dict[i]:
+                if colors[i] == colors[adj]:
+                    # Try to recolor i
+                    adj_colors = {colors[a] for a in adjacency_dict[i] if colors[a] != -1}
+                    valid = [c for c in range(n_colors) if c not in adj_colors]
+                    if valid:
+                        colors[i] = rng.choice(valid)
+                        conflicts = True
                         break
-                else:
-                    # If no color works, use the least used one (this violates adjacency)
-                    color = min(range(max_colors), key=lambda c: color_counts[c])
+            if conflicts:
                 break
-
-        colors[i] = color
+        if not conflicts:
+            break
 
     num_colors_used = max(colors) + 1
     logger.info(f"  Successfully colored with {num_colors_used} colors")
@@ -256,9 +253,8 @@ def color_neighborhoods_greedy(adjacency_dict: Dict[int, List[int]], num_neighbo
 
 # Named palettes — each has 8 muted, distinguishable colors
 PALETTES = {
-    'earthy': [              # current — warm naturals
-        '#F5D54A',  '#357560',  '#B87F45',  '#8B341F',
-        '#CBC497',  '#9EB45B',  '#384727',  '#A67B5B',
+    'earthy': [              # warm sandy/beige/orange tones
+        '#C9B99A',  '#D4A373',  '#B87F45',  '#C47E5A',  '#8B4225',
     ],
     'nordic': [              # cool Scandinavian tones
         '#7B9EA8',  '#D4A373',  '#A3B18A',  '#BC6C6C',
@@ -280,13 +276,17 @@ PALETTES = {
         '#8A9BA3',  '#BFA87A',  '#7B8C72',  '#A3747A',
         '#C5BDB0',  '#5E7E73',  '#9A8868',  '#7A8FA0',
     ],
+    'industrial': [          # industrial chic — concrete, rust, steel, patina
+        '#8C8C8C',  '#B5703C',  '#4A5859',  '#A39482',
+        '#6E7B8B',  '#C4956A',  '#3E4E50',  '#9B8578',
+    ],
 }
 
 
 def create_distinct_colors(n, palette='earthy'):
     """Create n maximally distinct colors from a named palette.
 
-    Available palettes: earthy, nordic, coastal, dusk, clay, mineral
+    Available palettes: earthy, nordic, coastal, dusk, clay, mineral, industrial
     """
     base_colors = list(PALETTES.get(palette, PALETTES['earthy']))
 
@@ -724,6 +724,27 @@ def get_neighborhood_color_map(neighborhoods: List[Neighborhood],
     logger.info(f"  Using {num_colors_needed} distinct colors")
 
     return neighborhood_color_map, color_palette
+
+
+def add_neighborhood_fills(ax, neighborhoods, color_map, alpha=0.3,
+                           edge_color='white', linewidth=0.5, zorder=2):
+    """Draw colored neighborhood polygons on an axis."""
+    import matplotlib.patches as mpatches
+    from matplotlib.collections import PatchCollection
+
+    patches = []
+    colors = []
+    for n in neighborhoods:
+        hex_color = color_map[n.name].lstrip('#')
+        rgb = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+        for polygon_coords in n.geometry.coordinates:
+            for ring_coords in polygon_coords:
+                patches.append(mpatches.Polygon(np.array(ring_coords), closed=True))
+                colors.append(rgb)
+    coll = PatchCollection(patches, alpha=alpha, edgecolors=edge_color,
+                           linewidths=linewidth, zorder=zorder)
+    coll.set_facecolor(colors)
+    ax.add_collection(coll)
 
 
 def build_neighborhood_index(neighborhoods: List[Neighborhood]) -> Tuple[list, list, 'STRtree']:
