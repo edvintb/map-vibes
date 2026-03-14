@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import os
+import urllib.parse
 import urllib.request
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -101,7 +102,7 @@ def download_parks():
 # NYC Zoning (ArcGIS FeatureServer — paginated)
 # ---------------------------------------------------------------------------
 
-def _download_arcgis_features(url, path, label):
+def _download_arcgis_features(url, path, label, where="1=1", out_fields="*"):
     """Download all features from an ArcGIS FeatureServer with pagination."""
     if os.path.exists(path):
         logger.info(f"  {path} already exists, skipping")
@@ -111,10 +112,11 @@ def _download_arcgis_features(url, path, label):
     all_features = []
     offset = 0
     batch_size = 2000
+    where_encoded = urllib.parse.quote(where)
 
     while True:
         query_url = (
-            f"{url}/query?where=1%3D1&outFields=*&outSR=4326"
+            f"{url}/query?where={where_encoded}&outFields={out_fields}&outSR=4326"
             f"&f=geojson&resultOffset={offset}&resultRecordCount={batch_size}"
         )
         req = urllib.request.Request(query_url)
@@ -154,6 +156,70 @@ def download_zoning():
     for filename, url, label in datasets:
         path = os.path.join(DATA_DIR, filename)
         _download_arcgis_features(url, path, label)
+
+
+def download_buildings():
+    """Download Manhattan building footprints with heights from NYC Open Data.
+
+    Dataset: Building Footprints (5zhs-2jue)
+    Contains ~47,000 buildings in Manhattan with LiDAR-derived roof heights.
+    Filters to Manhattan via BIN prefix (1xxxxxxx).
+    """
+    path = os.path.join(DATA_DIR, "manhattan_buildings.json")
+    if os.path.exists(path):
+        logger.info(f"  {path} already exists, skipping")
+        return
+
+    try:
+        from sodapy import Socrata
+    except ImportError:
+        logger.error("sodapy not installed. Run: pip install sodapy")
+        return
+
+    logger.info("  Downloading Manhattan building footprints...")
+    client = Socrata("data.cityofnewyork.us", None)
+
+    all_results = []
+    offset = 0
+    batch_size = 50000
+
+    while True:
+        results = client.get(
+            "5zhs-2jue",
+            where="bin >= 1000000 AND bin < 2000000",
+            select="the_geom, height_roof, ground_elevation",
+            limit=batch_size,
+            offset=offset,
+        )
+        if not results:
+            break
+        all_results.extend(results)
+        logger.info(f"    fetched {len(all_results)} buildings...")
+        offset += batch_size
+        if len(results) < batch_size:
+            break
+
+    with open(path, "w") as f:
+        json.dump(all_results, f)
+    logger.info(f"  -> manhattan_buildings.json ({len(all_results)} records)")
+
+
+def download_land_use():
+    """Download MapPLUTO parcel-level land use for Manhattan from NYC DCP ArcGIS.
+
+    MapPLUTO contains ~43,000 individual tax lots in Manhattan, each with a
+    LandUse code (01-11) and polygon geometry — far more detailed than the
+    ~1,000 zoning districts.
+    """
+    arcgis_base = "https://services5.arcgis.com/GfwWNkhOj9bNBqoJ/arcgis/rest/services"
+    path = os.path.join(DATA_DIR, "manhattan_land_use.json")
+    _download_arcgis_features(
+        f"{arcgis_base}/MapPLUTO/FeatureServer/0",
+        path,
+        "NYC MapPLUTO (Manhattan parcel-level land use)",
+        where="Borough='MN'",
+        out_fields="LandUse",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +290,12 @@ def main():
 
     logger.info("Downloading NYC Zoning Data...")
     download_zoning()
+
+    logger.info("Downloading NYC Land Use Data (MapPLUTO)...")
+    download_land_use()
+
+    logger.info("Downloading NYC Building Footprints...")
+    download_buildings()
 
     if not args.skip_dem:
         logger.info("Downloading USGS 3DEP DEM...")

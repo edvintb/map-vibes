@@ -41,6 +41,13 @@ class ZoneCategory(Enum):
     PUBLIC = "Public"
     PARK = "Park"
     OTHER = "Other"
+    # Detailed land-use subcategories (PLUTO)
+    RESIDENTIAL_LOW = "1-2 Family"
+    RESIDENTIAL_MID = "Walk-Up"
+    RESIDENTIAL_HIGH = "Elevator"
+    TRANSPORTATION = "Transportation"
+    PARKING = "Parking"
+    VACANT = "Vacant"
 
 
 DEFAULT_ZONE_COLORS: Dict[ZoneCategory, str] = {
@@ -51,6 +58,13 @@ DEFAULT_ZONE_COLORS: Dict[ZoneCategory, str] = {
     ZoneCategory.PUBLIC:      "#488A44",
     ZoneCategory.PARK:        "#488A44",
     ZoneCategory.OTHER:       "#B8AFA3",
+    # Detailed land-use subcategory colors
+    ZoneCategory.RESIDENTIAL_LOW:  "#D4915E",
+    ZoneCategory.RESIDENTIAL_MID:  "#C06830",
+    ZoneCategory.RESIDENTIAL_HIGH: "#A0522D",
+    ZoneCategory.TRANSPORTATION:   "#9E8B7E",
+    ZoneCategory.PARKING:          "#C4B8A8",
+    ZoneCategory.VACANT:           "#D4C5B0",
 }
 
 
@@ -277,6 +291,41 @@ def load_nyc_zoning_color_source(
         path,
         lambda props: _classify_nyc_zonedist(props.get("ZONEDIST", "")),
     )
+    return _build_color_source(data, zone_colors)
+
+
+# ---------------------------------------------------------------------------
+# Category mapping — NYC PLUTO land use (LandUse field, parcel-level)
+# ---------------------------------------------------------------------------
+
+NYC_PLUTO_LAND_USE_MAP: Dict[str, ZoneCategory] = {
+    "01": ZoneCategory.RESIDENTIAL_LOW,   # One & Two Family Buildings
+    "02": ZoneCategory.RESIDENTIAL_MID,   # Multi-Family Walk-Up
+    "03": ZoneCategory.RESIDENTIAL_HIGH,  # Multi-Family Elevator
+    "04": ZoneCategory.MIXED_USE,         # Mixed Residential & Commercial
+    "05": ZoneCategory.COMMERCIAL,        # Commercial & Office
+    "06": ZoneCategory.INDUSTRIAL,        # Industrial & Manufacturing
+    "07": ZoneCategory.TRANSPORTATION,    # Transportation & Utility
+    "08": ZoneCategory.PUBLIC,            # Public Facilities & Institutions
+    "09": ZoneCategory.PARK,              # Open Space & Outdoor Recreation
+    "10": ZoneCategory.PARKING,           # Parking Facilities
+    "11": ZoneCategory.VACANT,            # Vacant Land
+}
+
+
+def _classify_nyc_pluto(props: dict) -> Optional[ZoneCategory]:
+    """Classify a PLUTO record by its LandUse code."""
+    lu = (props.get("LandUse") or "").strip()
+    return NYC_PLUTO_LAND_USE_MAP.get(lu)
+
+
+def load_nyc_land_use_color_source(
+    path: str = "data/manhattan_land_use.json",
+    zone_colors: Optional[Dict[ZoneCategory, str]] = None,
+) -> Tuple[Dict[str, List], List[ZoneCategory]]:
+    """Load NYC MapPLUTO parcel-level land use and return color_source."""
+    logger.info("Loading NYC parcel-level land use (MapPLUTO)...")
+    data = _load_geojson_zoning(path, _classify_nyc_pluto)
     return _build_color_source(data, zone_colors)
 
 

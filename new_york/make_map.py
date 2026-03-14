@@ -48,7 +48,8 @@ from process_elevation import (
 )
 from process_zoning import (
     ZoneCategory, DEFAULT_ZONE_COLORS,
-    load_nyc_zoning_color_source, add_zoning_legend,
+    load_nyc_zoning_color_source, load_nyc_land_use_color_source,
+    add_zoning_legend,
     add_nyc_special_purpose, add_nyc_commercial_overlay,
 )
 
@@ -202,6 +203,116 @@ def add_parks(ax, parks_file="data/manhattan_parks.json", city_boundary=None,
         f"  Added {len(patches_list)} park polygons, "
         f"labeled {len(labeled_parks) - skipped} parks (skipped {skipped} overlaps)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Buildings (isometric shadow casting)
+# ---------------------------------------------------------------------------
+
+def add_buildings(ax, buildings_file="data/manhattan_buildings.json",
+                  city_boundary=None,
+                  shadow_color=(0.12, 0.10, 0.08),
+                  shadow_alpha=0.45,
+                  building_edge_color=(0.40, 0.35, 0.30, 0.45),
+                  building_edge_width=0.15,
+                  max_shadow_deg=0.003,
+                  min_shadow_height=20.0):
+    """Add building footprints with isometric shadow casting.
+
+    Taller buildings cast longer shadows to the SE (sun from NW).
+    Shadow length is proportional to roof height.
+    """
+    from shapely.geometry import shape as shapely_shape, MultiPolygon, Polygon
+
+    with open(buildings_file, "r") as f:
+        buildings = json.load(f)
+
+    # Longitude correction at NYC latitude (~40.78°N)
+    cos_lat = np.cos(np.radians(40.78))
+    # Shadow direction: 135° (SE), corrected for lon/lat aspect ratio
+    shadow_dir_lon = max_shadow_deg * 0.707 / cos_lat
+    shadow_dir_lat = -max_shadow_deg * 0.707
+
+    shadow_patches = []
+    building_patches = []
+    max_h = 1.0  # will be updated
+
+    # First pass: collect all valid polygons + heights
+    entries = []
+    for bldg in buildings:
+        geom_data = bldg.get("the_geom")
+        if not geom_data:
+            continue
+        height = float(bldg.get("height_roof", 0) or 0)
+        try:
+            geom = shapely_shape(geom_data)
+            if not geom.is_valid:
+                geom = geom.buffer(0)
+            if city_boundary is not None:
+                geom = geom.intersection(city_boundary)
+            if geom.is_empty:
+                continue
+
+            polys = []
+            if isinstance(geom, Polygon):
+                polys = [geom]
+            elif isinstance(geom, MultiPolygon):
+                polys = list(geom.geoms)
+            elif hasattr(geom, "geoms"):
+                polys = [g for g in geom.geoms if isinstance(g, Polygon)]
+
+            for poly in polys:
+                coords = np.array(poly.exterior.coords)
+                if len(coords) >= 3:
+                    entries.append((coords, height))
+                    if height > max_h:
+                        max_h = height
+        except Exception:
+            continue
+
+    logger.info(f"  Parsed {len(entries)} building polygons "
+                f"(max height: {max_h:.0f} ft)")
+
+    # Second pass: create shadow + building patches
+    for coords, height in entries:
+        # Building outline (all buildings)
+        building_patches.append(mpatches.Polygon(coords, closed=True))
+
+        # Shadow (only for buildings above threshold)
+        if height >= min_shadow_height:
+            h_frac = height / max_h
+            offset_lon = shadow_dir_lon * h_frac
+            offset_lat = shadow_dir_lat * h_frac
+            shadow_coords = coords.copy()
+            shadow_coords[:, 0] += offset_lon
+            shadow_coords[:, 1] += offset_lat
+            shadow_patches.append(mpatches.Polygon(shadow_coords, closed=True))
+
+    # Render shadows first (below buildings)
+    if shadow_patches:
+        sc = PatchCollection(
+            shadow_patches,
+            facecolors=[(*shadow_color, shadow_alpha)] * len(shadow_patches),
+            edgecolors="none",
+            linewidths=0,
+            zorder=2,
+        )
+        ax.add_collection(sc)
+
+    # Render building outlines (no fill, thin edges)
+    if building_patches:
+        bc = PatchCollection(
+            building_patches,
+            facecolors="none",
+            edgecolors=[building_edge_color] * len(building_patches),
+            linewidths=building_edge_width,
+            zorder=3,
+        )
+        ax.add_collection(bc)
+
+    n_shadows = len(shadow_patches)
+    logger.info(f"  Added {len(building_patches)} buildings, "
+                f"{n_shadows} shadows (height >= {min_shadow_height} ft)")
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +664,8 @@ def make_poster(
     contour_major_linewidth: float = 0.8,
     contour_alpha: float = 0.45,
     show_zoning: bool = False,
+    show_land_use: bool = False,
+    show_buildings: bool = False,
     show_zoning_special: bool = False,
     show_zoning_commercial: bool = False,
     zoning_alpha: float = 0.8,
@@ -604,9 +717,14 @@ def make_poster(
     ax.set_ylim(view_ymin, view_ymax)
 
     # --- Layer 1: Hillshade ---
-    # Color source: zoning replaces neighborhood coloring when enabled.
+    # Color source: land use or zoning replaces neighborhood coloring when enabled.
     zoning_cats = []
-    if show_zoning:
+    legend_title = "Zoning Districts"
+    if show_land_use:
+        color_source, zoning_cats = load_nyc_land_use_color_source(
+            zone_colors=zone_colors)
+        legend_title = "Land Use"
+    elif show_zoning:
         color_source, zoning_cats = load_nyc_zoning_color_source(
             zone_colors=zone_colors)
     else:
@@ -623,7 +741,7 @@ def make_poster(
 
     if zoning_cats and show_zoning_legend:
         add_zoning_legend(ax, zoning_cats, zone_colors,
-                          loc=zoning_legend_loc, title="Zoning Districts")
+                          loc=zoning_legend_loc, title=legend_title)
 
     # Additional overlays (semi-transparent, on top of shaded zoning)
     if show_zoning_special:
@@ -666,6 +784,10 @@ def make_poster(
                 )
         except FileNotFoundError:
             logger.warning(f"Elevation data not found at {elevation_file} — skipping contours")
+
+    # --- Layer 3b: Buildings with isometric shadows ---
+    if show_buildings:
+        add_buildings(ax, city_boundary=city_boundary)
 
     # --- Neighborhood labels ---
     if neighborhood_labels:
@@ -776,6 +898,10 @@ if __name__ == "__main__":
     # Zoning arguments
     parser.add_argument("--show-zoning", action="store_true", default=False,
                         help="Enable zoning districts overlay")
+    parser.add_argument("--show-land-use", action="store_true", default=False,
+                        help="Enable parcel-level land use overlay (MapPLUTO)")
+    parser.add_argument("--show-buildings", action="store_true", default=False,
+                        help="Enable building footprints with isometric shadows")
     parser.add_argument("--show-zoning-special", action="store_true", default=False,
                         help="Enable special purpose districts overlay")
     parser.add_argument("--show-zoning-commercial", action="store_true", default=False,
@@ -833,6 +959,8 @@ if __name__ == "__main__":
         contour_major_linewidth=args.contour_major_linewidth,
         contour_alpha=args.contour_alpha,
         show_zoning=args.show_zoning,
+        show_land_use=args.show_land_use,
+        show_buildings=args.show_buildings,
         show_zoning_special=args.show_zoning_special,
         show_zoning_commercial=args.show_zoning_commercial,
         zoning_alpha=args.zoning_alpha,
