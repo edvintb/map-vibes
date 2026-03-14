@@ -784,3 +784,24 @@ def build_neighborhood_index(neighborhoods: List[Neighborhood]) -> Tuple[list, l
 
     tree = STRtree(polys)
     return names, polys, tree
+
+
+def add_neighborhood_borders(ax, neighborhoods, bg_color="#faf8f4", linewidth=1.2, zorder=2):
+    """Draw neighborhood polygons with background-colored edges (no fill)."""
+    logger = logging.getLogger(__name__)
+    border_patches = []
+    for neighborhood in neighborhoods:
+        for polygon_coords in neighborhood.geometry.coordinates:
+            for ring_coords in polygon_coords:
+                coords_array = np.array(ring_coords)
+                border_patches.append(patches.Polygon(coords_array, closed=True))
+
+    coll = PatchCollection(
+        border_patches,
+        facecolors="none",
+        edgecolors=bg_color,
+        linewidths=linewidth,
+        zorder=zorder,
+    )
+    ax.add_collection(coll)
+    logger.info(f"  Added {len(border_patches)} neighborhood border polygons")

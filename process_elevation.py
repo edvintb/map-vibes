@@ -18,6 +18,7 @@ from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from matplotlib.colors import Normalize
+from colors import darken_rgb as _darken_rgb
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -519,13 +520,6 @@ def visualize_elevation_by_type(elevation_data: ElevationData,
     )
 
 
-def _darken_hex(hex_color: str, factor: float = 0.55):
-    """Darken a hex color by multiplying RGB channels."""
-    h = hex_color.lstrip('#')
-    r, g, b = (int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-    return (r * factor, g * factor, b * factor)
-
-
 def _elevation_tint(hex_color: str, t: float):
     """Map a neighborhood color through an elevation gradient.
 
@@ -697,7 +691,7 @@ def add_contour_lines(
                 darken_factor = 0.7 - 0.4 * t
                 if is_major:
                     darken_factor *= 0.75
-                rgb = _darken_hex(color_override, darken_factor)
+                rgb = _darken_rgb(color_override, darken_factor)
             else:
                 rgb = _elevation_tint(color_override, t)
             for seg in (clipped_segments if clipped_segments else [coords]):
@@ -727,7 +721,7 @@ def add_contour_lines(
                     darken_factor = 0.7 - 0.4 * t
                     if is_major:
                         darken_factor *= 0.75
-                    rgb = _darken_hex(hex_color, darken_factor)
+                    rgb = _darken_rgb(hex_color, darken_factor)
                 else:
                     rgb = _elevation_tint(hex_color, t)
                 for seg in segments:
@@ -750,7 +744,7 @@ def add_contour_lines(
                 gap_geom = line.difference(covered)
                 gap_segments = _extract_line_coords(gap_geom)
                 if gap_segments:
-                    gap_rgb = _darken_hex(gap_color, 0.5 - 0.3 * t)
+                    gap_rgb = _darken_rgb(gap_color, 0.5 - 0.3 * t)
                     for seg in gap_segments:
                         if is_major:
                             lines_major.append(seg)
@@ -764,7 +758,7 @@ def add_contour_lines(
                 pass
         elif gap_color is not None and not covered_geoms:
             # Entire isoline is in a gap — render it all in gap color
-            gap_rgb = _darken_hex(gap_color, 0.5 - 0.3 * t)
+            gap_rgb = _darken_rgb(gap_color, 0.5 - 0.3 * t)
             if is_major:
                 lines_major.append(coords)
                 colors_major.append(gap_rgb)
@@ -847,7 +841,7 @@ def add_neighborhood_contours(ax: Axes, elevation_data: ElevationData,
                         darken_factor = 0.7 - 0.4 * t
                         if is_major:
                             darken_factor *= 0.75
-                        rgb = _darken_hex(hex_color, darken_factor)
+                        rgb = _darken_rgb(hex_color, darken_factor)
                     else:
                         rgb = _elevation_tint(hex_color, t)
                     for seg in segments:

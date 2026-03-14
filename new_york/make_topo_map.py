@@ -21,45 +21,21 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.collections import PatchCollection
 
 import json
 import logging
-import numpy as np
 
 from process_neighborhoods import (
     parse_neighborhoods,
-    build_neighborhood_index,
     add_smart_neighborhood_labels,
+    add_neighborhood_borders,
 )
 from process_terrain import add_hillshade
-from make_map import add_bridges, add_geographic_labels, DEM_BBOX, POSTER_WIDTH, POSTER_HEIGHT, DEG_PER_INCH
+from make_map import add_bridges, add_geographic_labels, PIXELS_PER_DEGREE
+from colors import BG_COLOR
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-BG_COLOR = "#faf8f4"
-
-
-def add_neighborhood_borders(ax, neighborhoods):
-    """Draw neighborhood polygons with background-colored edges."""
-    patches = []
-    for neighborhood in neighborhoods:
-        for polygon_coords in neighborhood.geometry.coordinates:
-            for ring_coords in polygon_coords:
-                coords_array = np.array(ring_coords)
-                patches.append(mpatches.Polygon(coords_array, closed=True))
-
-    coll = PatchCollection(
-        patches,
-        facecolors="none",
-        edgecolors=BG_COLOR,
-        linewidths=1.2,
-        zorder=2,
-    )
-    ax.add_collection(coll)
-    logger.info(f"  Added {len(patches)} neighborhood border polygons")
 
 
 # ---------------------------------------------------------------------------
@@ -70,10 +46,21 @@ def make_topo_map(
     neighborhoods_file: str = "data/manhattan_neighborhoods.json",
     dem_path: str = "data/manhattan_dem.tif",
     save_path: str = "images/manhattan_topo_poster.tiff",
-    figsize=(POSTER_WIDTH, POSTER_HEIGHT),
+    figsize=(14.4, 18.0),
     dpi: int = 600,
+    scale_factor: float = 0.2,
+    center_lon: float = -73.98,
+    center_lat: float = 40.78,
 ):
     """Generate a gray-hillshade topographic poster of Manhattan."""
+
+    # Compute view extent (same logic as make_poster)
+    extent_w = figsize[0] * dpi * scale_factor / PIXELS_PER_DEGREE
+    extent_h = figsize[1] * dpi * scale_factor / PIXELS_PER_DEGREE
+    view_xmin = center_lon - extent_w / 2
+    view_xmax = center_lon + extent_w / 2
+    view_ymin = center_lat - extent_h / 2
+    view_ymax = center_lat + extent_h / 2
 
     logger.info("Loading data...")
     with open(neighborhoods_file, "r") as f:
@@ -88,9 +75,9 @@ def make_topo_map(
         spine.set_visible(False)
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
-    # Set view to DEM bounding box
-    ax.set_xlim(DEM_BBOX[0], DEM_BBOX[2])
-    ax.set_ylim(DEM_BBOX[1], DEM_BBOX[3])
+    # Set view to computed bounding box
+    ax.set_xlim(view_xmin, view_xmax)
+    ax.set_ylim(view_ymin, view_ymax)
 
     # --- Map layers ---
     add_hillshade(ax, dem_path)

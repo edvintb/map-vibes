@@ -24,16 +24,15 @@ import urllib.request
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = "data"
-
-# USGS 1/3 arc-second native resolution
-PIXELS_PER_DEGREE = 10800
+from constants import PIXELS_PER_DEGREE, DEFAULT_EXTENT, DATA_DIR
 
 # City-specific defaults
 CENTER_LON = -73.98
 CENTER_LAT = 40.78
-DEFAULT_EXTENT = 0.23  # degrees per side — ~26 km at native 10800 px/deg
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ import matplotlib.patches as mpatches
 from matplotlib.axes import Axes
 from matplotlib.collections import PatchCollection
 from shapely.geometry import shape as shapely_shape, Polygon, MultiPolygon
+from colors import darken_hex as _darken_hex
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -332,11 +333,6 @@ def load_nyc_land_use_color_source(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _darken_hex(hex_color: str, factor: float = 0.7) -> str:
-    h = hex_color.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return f"#{int(r * factor):02x}{int(g * factor):02x}{int(b * factor):02x}"
 
 
 def _geom_to_patches(geom) -> List[mpatches.Polygon]:

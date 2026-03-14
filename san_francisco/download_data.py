@@ -23,15 +23,14 @@ import urllib.request
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = "data"
-
-# USGS 1/3 arc-second native resolution
-PIXELS_PER_DEGREE = 10800
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from constants import PIXELS_PER_DEGREE, DEFAULT_EXTENT, DATA_DIR
 
 # City-specific defaults
 CENTER_LON = -122.435
 CENTER_LAT = 37.785
-DEFAULT_EXTENT = 0.23  # degrees per side — ~26 km at native 10800 px/deg
 
 # ---------------------------------------------------------------------------
 # SF Open Data datasets (Socrata API)

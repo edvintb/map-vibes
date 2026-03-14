@@ -25,45 +25,21 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.collections import PatchCollection
 
 import json
 import logging
-import numpy as np
 
 from process_neighborhoods import (
     parse_neighborhoods,
-    build_neighborhood_index,
     add_smart_neighborhood_labels,
+    add_neighborhood_borders,
 )
 from process_terrain import add_hillshade
 from make_map import add_bridges, add_geographic_labels
+from colors import BG_COLOR
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-BG_COLOR = "#faf8f4"  # Light paper background
-
-
-def add_neighborhood_borders(ax, neighborhoods):
-    """Draw neighborhood polygons with background-colored edges."""
-    patches = []
-    for neighborhood in neighborhoods:
-        for polygon_coords in neighborhood.geometry.coordinates:
-            for ring_coords in polygon_coords:
-                coords_array = np.array(ring_coords)
-                patches.append(mpatches.Polygon(coords_array, closed=True))
-
-    coll = PatchCollection(
-        patches,
-        facecolors="none",
-        edgecolors=BG_COLOR,
-        linewidths=1.2,
-        zorder=2,
-    )
-    ax.add_collection(coll)
-    logger.info(f"  Added {len(patches)} neighborhood border polygons")
 
 
 # ---------------------------------------------------------------------------

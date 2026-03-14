@@ -53,15 +53,13 @@ from process_zoning import (
     load_sf_zoning_color_source, load_sf_land_use_color_source,
     add_zoning_legend,
 )
+from draw_bridges import draw_bridges
+from colors import darken_hex as _darken, BG_COLOR
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BG_COLOR = "#faf8f4"  # Light paper background
 
-# Bridge scaling constants
-TOWER_RATIO = 0.1567   # peak_h / bridge_length (Bay Bridge calibration)
-RODS_PER_INCH = 40     # suspender rods per rendered inch of bridge
 
 
 # ---------------------------------------------------------------------------
@@ -262,134 +260,27 @@ def add_geographic_labels(ax):
 
 def add_bridges(ax, golden_gate_color="#B5564E", bay_bridge_color="#B8AFA3",
                 bridge_labels=False):
-    """Draw side-elevation bridge profiles at geographic locations.
-
-    All visual sizes derive from the axes extent and figure dimensions
-    so that changing figsize or DEM extent scales automatically.
-    """
-    fig = ax.get_figure()
-    fig_h = fig.get_size_inches()[1]
-    ylim = ax.get_ylim()
-    dpi = (ylim[1] - ylim[0]) / fig_h  # deg per inch
-    lw_scale = fig_h / 18.0
-    label_gap = 0.25 * dpi  # 0.25 inches in coordinate space
-
-    # --- Cable physics ---
-    def _cable_height(t, towers, peak_h):
-        a = 2.0
-        def _catenary_rise(s, h_target):
-            return h_target * (np.cosh(a * s) - 1) / (np.cosh(a) - 1)
-        pts = [(0.0, 0.0)] + list(towers) + [(1.0, 0.0)]
-        for i in range(len(pts) - 1):
-            f0, h0 = pts[i]
-            f1, h1 = pts[i + 1]
-            if f0 <= t <= f1:
-                span = f1 - f0
-                if span == 0:
-                    return h0
-                s = (t - f0) / span
-                if h0 < h1:
-                    return _catenary_rise(s, h1)
-                elif h0 > h1:
-                    return _catenary_rise(1 - s, h0)
-                else:
-                    return h0 * (2 * s - 1) ** 2
-        return 0.0
-
-    def _make_perp(start, end):
-        d = (end - start) / np.linalg.norm(end - start)
-        perp = np.array([-d[1], d[0]])
-        if perp[1] < 0:
-            perp = -perp
-        return perp
-
-    def _draw_bridge(ax, start, end, perp, tower_fracs, peak_h, n_rods,
-                     color, zorder):
-        vec = end - start
-        towers = [(f, peak_h) for f in tower_fracs]
-        ax.plot([start[0], end[0]], [start[1], end[1]],
-                color=color, lw=1.6 * lw_scale, zorder=zorder,
-                solid_capstyle="butt")
-        t_arr = np.linspace(0, 1, 300)
-        h_arr = np.array([_cable_height(t, towers, peak_h) for t in t_arr])
-        cable_pts = (start[np.newaxis, :] +
-                     np.outer(t_arr, vec) +
-                     np.outer(h_arr, perp))
-        ax.plot(cable_pts[:, 0], cable_pts[:, 1],
-                color=color, lw=0.7 * lw_scale, zorder=zorder + 1, alpha=0.85)
-        for i in range(n_rods):
-            ti = (i + 1) / (n_rods + 1)
-            deck_pt = start + vec * ti
-            h = _cable_height(ti, towers, peak_h)
-            cable_pt = deck_pt + perp * h
-            ax.plot([deck_pt[0], cable_pt[0]], [deck_pt[1], cable_pt[1]],
-                    color=color, lw=0.25 * lw_scale, zorder=zorder + 1,
-                    alpha=0.5)
-
-    zz = 9
-
-    label_style = dict(
-        fontweight="bold", fontfamily="sans-serif",
-        path_effects=[pe.withStroke(linewidth=1.0 * lw_scale,
-                                    foreground="white")],
-        zorder=zz + 5, linespacing=1.1,
-    )
-
-    # Bridge data: coordinates from OSM (trimmed to DEM shoreline),
-    # tower fractions from Wikipedia span dimensions.
-    # label_side: +1 = above bridge, -1 = below bridge.
-    def _darken(hex_color, factor=0.65):
-        r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
-        return f"#{int(r*factor):02x}{int(g*factor):02x}{int(b*factor):02x}"
-
+    """Draw side-elevation bridge profiles for Golden Gate and Bay Bridge."""
     bridges = [
         dict(name="GOLDEN GATE\nBRIDGE",
              start=[-122.47700, 37.81050], end=[-122.47970, 37.82630],
              tower_fracs=[0.175, 0.825],
-             color=golden_gate_color, label_color=_darken(golden_gate_color),
+             color=golden_gate_color, label_color=_darken(golden_gate_color, 0.65),
              label_side=-1, label_offset=(-0.003, 0.0)),
         dict(name="BAY BRIDGE",
              start=[-122.38800, 37.78870], end=[-122.36700, 37.80830],
              tower_fracs=[0.167, 0.50, 0.833],
-             color=bay_bridge_color, label_color=_darken(bay_bridge_color),
+             color=bay_bridge_color, label_color=_darken(bay_bridge_color, 0.65),
              label_side=-1),
     ]
-
-    for b in bridges:
-        start = np.array(b["start"])
-        end = np.array(b["end"])
-        perp = _make_perp(start, end)
-        length = np.linalg.norm(end - start)
-        peak_h = TOWER_RATIO * length
-        bridge_inches = length / dpi
-        n_rods = max(6, round(RODS_PER_INCH * bridge_inches))
-
-        _draw_bridge(ax, start, end, perp,
-                     tower_fracs=b["tower_fracs"],
-                     peak_h=peak_h, n_rods=n_rods,
-                     color=b["color"], zorder=zz)
-
-        if bridge_labels:
-            side = b.get("label_side", 1)
-            fontsize = max(3.5, min(5.5, 3.5 + 2.0 * bridge_inches)) * lw_scale
-            lp = (start + end) / 2 + perp * label_gap * side
-            offset = b.get("label_offset", (0.0, 0.0))
-            lp[0] += offset[0]
-            lp[1] += offset[1]
-            va = "bottom" if side > 0 else "top"
-            ax.text(lp[0], lp[1], b["name"],
-                    ha="center", va=va,
-                    fontsize=fontsize, color=b["label_color"],
-                    **label_style)
-
-    logger.info(f"  Added bridges{' with labels' if bridge_labels else ''}")
+    draw_bridges(ax, bridges, bridge_labels=bridge_labels)
 
 
 # ---------------------------------------------------------------------------
 # Main poster composition
 # ---------------------------------------------------------------------------
 
-PIXELS_PER_DEGREE = 10800  # USGS 1/3 arc-second native resolution
+from constants import PIXELS_PER_DEGREE
 
 
 def make_poster(
