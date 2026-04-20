@@ -20,15 +20,13 @@ import logging
 import os
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-from constants import PIXELS_PER_DEGREE, DEFAULT_EXTENT, DATA_DIR
+os.chdir(Path(__file__).resolve().parent)
+from common.constants import DATA_DIR, DEFAULT_EXTENT, PIXELS_PER_DEGREE
 
 # City-specific defaults
 CENTER_LON = -73.98
@@ -222,6 +220,122 @@ def download_land_use():
 
 
 # ---------------------------------------------------------------------------
+# Tunnel centerlines (OpenStreetMap via Overpass API)
+# ---------------------------------------------------------------------------
+
+# OSM uses slightly different names across eras — each entry is (label, [aliases])
+# where the first alias that matches OSM data wins. Order matters: the renderer
+# zips tunnels with a fixed color/style list.
+TUNNEL_NAMES = [
+    ("Holland Tunnel", ["Holland Tunnel"]),
+    ("Lincoln Tunnel", ["Lincoln Tunnel"]),
+    ("Queens-Midtown Tunnel", ["Queens-Midtown Tunnel", "Queens Midtown Tunnel"]),
+    ("Hugh L. Carey Tunnel",
+     ["Hugh L. Carey Tunnel", "Hugh L Carey Tunnel", "Brooklyn-Battery Tunnel"]),
+]
+
+
+def _subsample_coords(coords, target=10):
+    """Return ~`target` evenly spaced points from a LineString coord list.
+
+    The renderer (add_tunnels) filters to features with fewer than 15 points,
+    so we keep the centerline short and simple.
+    """
+    if len(coords) <= target:
+        return coords
+    step = (len(coords) - 1) / (target - 1)
+    return [coords[round(i * step)] for i in range(target)]
+
+
+def download_tunnels():
+    """Download Manhattan tunnel centerlines from OpenStreetMap (Overpass API).
+
+    Queries for each named vehicular tunnel, concatenates its way geometries
+    end-to-end, then subsamples to a ~10-point centerline. The output format
+    matches what make_map.py's add_tunnels() expects: a GeoJSON
+    FeatureCollection with one short LineString per tunnel.
+    """
+    path = os.path.join(DATA_DIR, "manhattan_tunnels.json")
+    if os.path.exists(path):
+        logger.info(f"  {path} already exists, skipping")
+        return
+
+    logger.info("  Downloading Manhattan tunnel centerlines from OpenStreetMap...")
+
+    overpass_url = "https://overpass-api.de/api/interpreter"
+    # Flatten all aliases; Overpass will return all matching ways, we'll
+    # group them back to canonical labels below.
+    all_aliases = [alias for _, aliases in TUNNEL_NAMES for alias in aliases]
+    # Filter by known tunnel names + tunnel=yes (excludes non-vehicular pedestrian tubes).
+    name_clauses = "\n".join(
+        f'  way["name"="{alias}"]["tunnel"="yes"];' for alias in all_aliases
+    )
+    query = f"""
+[out:json][timeout:60];
+(
+{name_clauses}
+);
+out geom;
+""".strip()
+
+    req = urllib.request.Request(
+        overpass_url,
+        data=urllib.parse.urlencode({"data": query}).encode(),
+        method="POST",
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "map-vibes/0.1 (https://github.com/)",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        logger.warning(f"  Overpass request failed ({e}); skipping tunnels. "
+                       f"The map will still render without them.")
+        return
+
+    # Group ways by OSM name, then map back to canonical labels.
+    ways_by_name = {}
+    for element in data.get("elements", []):
+        if element.get("type") != "way":
+            continue
+        name = element.get("tags", {}).get("name", "")
+        geometry = element.get("geometry", [])
+        coords = [[pt["lon"], pt["lat"]] for pt in geometry]
+        if len(coords) < 2:
+            continue
+        ways_by_name.setdefault(name, []).append(coords)
+
+    features = []
+    for label, aliases in TUNNEL_NAMES:
+        ways = []
+        for alias in aliases:
+            ways.extend(ways_by_name.get(alias, []))
+        if not ways:
+            logger.warning(f"    no OSM ways found for {label} "
+                           f"(tried: {', '.join(aliases)})")
+            continue
+        # Use the longest single tube as the reference geometry, then subsample.
+        longest = max(ways, key=len)
+        short = _subsample_coords(longest, target=10)
+        features.append({
+            "type": "Feature",
+            "properties": {"name": label, "source": "OpenStreetMap"},
+            "geometry": {"type": "LineString", "coordinates": short},
+        })
+
+    geojson = {
+        "type": "FeatureCollection",
+        "description": "Vehicular tunnel centerlines, subsampled from OSM.",
+        "features": features,
+    }
+    with open(path, "w") as f:
+        json.dump(geojson, f)
+    logger.info(f"  -> manhattan_tunnels.json ({len(features)} tunnels)")
+
+
+# ---------------------------------------------------------------------------
 # USGS 3DEP DEM
 # ---------------------------------------------------------------------------
 
@@ -267,6 +381,7 @@ def download_dem(center_lon, center_lat, extent):
 # ---------------------------------------------------------------------------
 
 def main():
+    """CLI entry point: fetch all Manhattan data into new_york/data/."""
     parser = argparse.ArgumentParser(
         description="Download data for Manhattan poster map",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -295,6 +410,9 @@ def main():
 
     logger.info("Downloading NYC Building Footprints...")
     download_buildings()
+
+    logger.info("Downloading Manhattan tunnel centerlines...")
+    download_tunnels()
 
     if not args.skip_dem:
         logger.info("Downloading USGS 3DEP DEM...")

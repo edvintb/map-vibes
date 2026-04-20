@@ -17,43 +17,47 @@ Usage:
 """
 
 import argparse
-import os, sys
+import os
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 os.chdir(Path(__file__).resolve().parent)
 
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.patheffects as pe
-
 import json
 import logging
-import numpy as np
 
 import matplotlib.patches as mpatches
+import matplotlib.patheffects as pe
+import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.collections import PatchCollection
 
-from process_neighborhoods import (
-    parse_neighborhoods, build_neighborhood_index,
-    get_neighborhood_color_map, add_smart_neighborhood_labels,
-)
-from process_terrain import add_hillshade
-from process_elevation import (
-    load_elevation_from_file, add_contour_lines,
-    build_contour_color_index_from_neighborhoods,
+from common.colors import BG_COLOR
+from common.draw_bridges import draw_bridges
+from common.process_elevation import (
+    add_contour_lines,
     build_contour_color_index_from_color_source,
+    build_contour_color_index_from_neighborhoods,
+    load_elevation_from_file,
 )
-from process_zoning import (
-    ZoneCategory, DEFAULT_ZONE_COLORS,
-    load_nyc_zoning_color_source, load_nyc_land_use_color_source,
+from common.process_neighborhoods import (
+    PALETTES,
+    add_smart_neighborhood_labels,
+    build_neighborhood_index,
+    get_neighborhood_color_map,
+    parse_neighborhoods,
+)
+from common.process_terrain import add_hillshade
+from common.process_zoning import (
+    ZoneCategory,
+    add_nyc_commercial_overlay,
+    add_nyc_special_purpose,
     add_zoning_legend,
-    add_nyc_special_purpose, add_nyc_commercial_overlay,
+    load_nyc_land_use_color_source,
+    load_nyc_zoning_color_source,
 )
-from draw_bridges import draw_bridges
-from colors import BG_COLOR
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -68,9 +72,10 @@ def add_parks(ax, parks_file="data/manhattan_parks.json", city_boundary=None,
               min_acres_for_label=3.0, park_color="#1e7a2a", park_alpha=0.75,
               park_labels=True):
     """Add park polygons with overlap-aware labels."""
-    from shapely.geometry import shape as shapely_shape, MultiPolygon, Polygon
+    from shapely.geometry import MultiPolygon, Polygon
+    from shapely.geometry import shape as shapely_shape
 
-    with open(parks_file, "r") as f:
+    with open(parks_file) as f:
         parks = json.load(f)
 
     # Parks handled as neighborhoods (skip polygon + label)
@@ -156,6 +161,7 @@ def add_parks(ax, parks_file="data/manhattan_parks.json", city_boundary=None,
     label_color = f"#{int(r*0.5):02x}{int(g*0.5):02x}{int(b*0.5):02x}"
 
     def overlaps_existing(cx, cy, label, fs):
+        """Return True if a label at (cx, cy) would overlap existing text."""
         tmp = ax.text(cx, cy, label, fontsize=fs, ha="center", va="center",
                       fontweight="bold", fontfamily="sans-serif", fontstyle="italic")
         bbox = tmp.get_window_extent(renderer)
@@ -219,9 +225,10 @@ def add_buildings(ax, buildings_file="data/manhattan_buildings.json",
     Taller buildings cast longer shadows to the SE (sun from NW).
     Shadow length is proportional to roof height.
     """
-    from shapely.geometry import shape as shapely_shape, MultiPolygon, Polygon
+    from shapely.geometry import MultiPolygon, Polygon
+    from shapely.geometry import shape as shapely_shape
 
-    with open(buildings_file, "r") as f:
+    with open(buildings_file) as f:
         buildings = json.load(f)
 
     # Longitude correction at NYC latitude (~40.78°N)
@@ -367,7 +374,17 @@ def add_tunnels(ax, dem_path="data/manhattan_dem.tif",
 
     All visual sizes derive from the axes extent and figure dimensions
     so scaling works automatically.
+
+    If the tunnels file is missing, logs a warning and skips the layer
+    rather than crashing — some download configurations don't fetch it.
     """
+    if not os.path.exists(tunnels_file):
+        logger.warning(
+            f"Tunnels file not found at {tunnels_file} — skipping tunnel layer. "
+            f"Run download_data.py to fetch it."
+        )
+        return
+
     import rasterio
 
     fig = ax.get_figure()
@@ -403,7 +420,7 @@ def add_tunnels(ax, dem_path="data/manhattan_dem.tif",
         return 0
 
     # Load tunnel centerlines (take the short approximations)
-    with open(tunnels_file, "r") as f:
+    with open(tunnels_file) as f:
         data = json.load(f)
 
     # Use only the short centerline approximations (< 15 points)
@@ -426,7 +443,7 @@ def add_tunnels(ax, dem_path="data/manhattan_dem.tif",
     zz = 9
     portal_size = max(2.0, 3.5 * lw_scale)
 
-    for (raw_name, coords), (label, color) in zip(centerlines, tunnel_defs):
+    for (_raw_name, coords), (label, color) in zip(centerlines, tunnel_defs, strict=False):
         coords = [list(c) for c in coords]
 
         # Find portal indices (where tunnel enters land from each end)
@@ -461,7 +478,7 @@ def add_tunnels(ax, dem_path="data/manhattan_dem.tif",
                     markeredgewidth=0.4 * lw_scale)
 
         # Find the underwater portion of the segment and label at its center
-        water_pts = [(x, y) for x, y in zip(xs, ys)
+        water_pts = [(x, y) for x, y in zip(xs, ys, strict=False)
                      if _elev_at(x, y) <= 1.0]
         if water_pts:
             # Midpoint of underwater section
@@ -537,7 +554,7 @@ def add_geographic_labels(ax):
 # Main poster composition
 # ---------------------------------------------------------------------------
 
-from constants import PIXELS_PER_DEGREE
+from common.constants import PIXELS_PER_DEGREE
 
 
 def make_poster(
@@ -564,7 +581,7 @@ def make_poster(
     contour_linewidth: float = 0.35,
     contour_major_linewidth: float = 0.8,
     contour_alpha: float = 0.45,
-    show_zoning: bool = False,
+    show_zoning: bool = True,
     show_land_use: bool = False,
     show_buildings: bool = False,
     show_zoning_special: bool = False,
@@ -591,7 +608,7 @@ def make_poster(
                 f"({extent_w:.3f} x {extent_h:.3f} deg)")
 
     logger.info("Loading data...")
-    with open(neighborhoods_file, "r") as f:
+    with open(neighborhoods_file) as f:
         neighborhoods = parse_neighborhoods(json.load(f))
     logger.info(f"  {len(neighborhoods)} neighborhoods")
 
@@ -729,6 +746,7 @@ def make_poster(
         )
 
     # --- Save ---
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     if save_full:
         logger.info(f"Saving full-resolution to {save_path} at {dpi} DPI...")
         fig.savefig(save_path, dpi=dpi, facecolor=fig.get_facecolor(),
@@ -760,7 +778,9 @@ if __name__ == "__main__":
     parser.add_argument("--center-lat", type=float, default=40.78,
                         help="Map center latitude (default: 40.78)")
     parser.add_argument("--palette", type=str, default="earthy",
-                        help="Color palette (default: earthy)")
+                        choices=sorted(PALETTES.keys()) + ["transparent"],
+                        help="Color palette (default: earthy). "
+                             "'transparent' disables neighborhood coloring.")
     parser.add_argument("--max-colors", type=int, default=5,
                         help="Max colors for graph coloring (default: 5)")
     parser.add_argument("--no-neighborhood-labels", action="store_true", default=False,
@@ -797,10 +817,14 @@ if __name__ == "__main__":
     parser.add_argument("--contour-alpha", type=float, default=0.45,
                         help="Contour opacity (default: 0.45)")
     # Zoning arguments
-    parser.add_argument("--show-zoning", action="store_true", default=False,
-                        help="Enable zoning districts overlay")
+    parser.add_argument("--show-zoning", action="store_true", default=True,
+                        dest="show_zoning",
+                        help="Enable zoning districts overlay (default: enabled)")
+    parser.add_argument("--no-show-zoning", action="store_false", dest="show_zoning",
+                        help="Disable zoning districts overlay")
     parser.add_argument("--show-land-use", action="store_true", default=False,
-                        help="Enable parcel-level land use overlay (MapPLUTO)")
+                        help="Enable parcel-level land use overlay (MapPLUTO). "
+                             "Takes precedence over --show-zoning.")
     parser.add_argument("--show-buildings", action="store_true", default=False,
                         help="Enable building footprints with isometric shadows")
     parser.add_argument("--show-zoning-special", action="store_true", default=False,
@@ -872,3 +896,15 @@ if __name__ == "__main__":
         show_attribution=not args.no_attribution,
         save_full=args.save_full,
     )
+
+    # Nudge users toward optional layers they might not know about.
+    # Zoning is on by default, so suggest alternatives.
+    if not any([args.show_land_use, args.show_buildings,
+                args.show_zoning_special, args.show_zoning_commercial,
+                args.park_labels, args.bridge_labels]):
+        logger.info(
+            "Tip: try --show-land-use, --show-buildings, --show-zoning-special, "
+            "--show-zoning-commercial, --park-labels, --bridge-labels, or "
+            "--no-show-zoning for a neighborhood-only view. "
+            "Run with --help for the full flag list."
+        )

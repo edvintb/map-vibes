@@ -19,42 +19,46 @@ Usage:
 """
 
 import argparse
-import os, sys
+import os
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 os.chdir(Path(__file__).resolve().parent)
 
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.patheffects as pe
-
 import json
 import logging
-import numpy as np
 
 import matplotlib.patches as mpatches
+import matplotlib.patheffects as pe
+import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.collections import PatchCollection
 
-from process_neighborhoods import (
-    parse_neighborhoods, build_neighborhood_index,
-    get_neighborhood_color_map, add_smart_neighborhood_labels,
-)
-from process_elevation import (
-    load_elevation_from_file, add_contour_lines,
-    build_contour_color_index_from_neighborhoods,
+from common.colors import BG_COLOR
+from common.colors import darken_hex as _darken
+from common.draw_bridges import draw_bridges
+from common.process_elevation import (
+    add_contour_lines,
     build_contour_color_index_from_color_source,
+    build_contour_color_index_from_neighborhoods,
+    load_elevation_from_file,
 )
-from process_terrain import add_hillshade
-from process_zoning import (
-    ZoneCategory, DEFAULT_ZONE_COLORS,
-    load_sf_zoning_color_source, load_sf_land_use_color_source,
+from common.process_neighborhoods import (
+    PALETTES,
+    add_smart_neighborhood_labels,
+    build_neighborhood_index,
+    get_neighborhood_color_map,
+    parse_neighborhoods,
+)
+from common.process_terrain import add_hillshade
+from common.process_zoning import (
+    ZoneCategory,
     add_zoning_legend,
+    load_sf_land_use_color_source,
+    load_sf_zoning_color_source,
 )
-from draw_bridges import draw_bridges
-from colors import darken_hex as _darken, BG_COLOR
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -84,9 +88,10 @@ def add_parks(
     """
     import matplotlib.patches as mpatches
     from matplotlib.collections import PatchCollection
-    from shapely.geometry import shape as shapely_shape, MultiPolygon, Polygon
+    from shapely.geometry import MultiPolygon, Polygon
+    from shapely.geometry import shape as shapely_shape
 
-    with open(parks_file, "r") as f:
+    with open(parks_file) as f:
         parks = json.load(f)
 
     # Parks whose polygons are skipped entirely (drawn as neighborhoods)
@@ -280,7 +285,7 @@ def add_bridges(ax, golden_gate_color="#B5564E", bay_bridge_color="#B8AFA3",
 # Main poster composition
 # ---------------------------------------------------------------------------
 
-from constants import PIXELS_PER_DEGREE
+from common.constants import PIXELS_PER_DEGREE
 
 
 def make_poster(
@@ -310,7 +315,7 @@ def make_poster(
     contour_linewidth: float = 0.55,
     contour_major_linewidth: float = 1.2,
     contour_alpha: float = 0.45,
-    show_zoning: bool = False,
+    show_zoning: bool = True,
     show_land_use: bool = False,
     zoning_alpha: float = 0.8,
     zone_colors: dict = None,
@@ -339,7 +344,7 @@ def make_poster(
 
     # --- Load data ---
     logger.info("Loading data...")
-    with open(neighborhoods_file, "r") as f:
+    with open(neighborhoods_file) as f:
         neighborhoods = parse_neighborhoods(json.load(f))
     logger.info(f"  {len(neighborhoods)} neighborhoods")
 
@@ -372,12 +377,14 @@ def make_poster(
 
     # --- Layer 1: Hillshade ---
     # Color source: zoning/land-use replaces neighborhood coloring when enabled.
+    # --show-land-use is explicit and rarer, so it takes precedence over the
+    # now-default --show-zoning.
     zoning_cats = []
-    if show_zoning:
-        color_source, zoning_cats = load_sf_zoning_color_source(
-            zone_colors=zone_colors)
-    elif show_land_use:
+    if show_land_use:
         color_source, zoning_cats = load_sf_land_use_color_source(
+            zone_colors=zone_colors)
+    elif show_zoning:
+        color_source, zoning_cats = load_sf_zoning_color_source(
             zone_colors=zone_colors)
     else:
         color_source = None
@@ -392,7 +399,7 @@ def make_poster(
     )
 
     if zoning_cats and show_zoning_legend:
-        legend_title = "Zoning Districts" if show_zoning else "Land Use"
+        legend_title = "Land Use" if show_land_use else "Zoning Districts"
         add_zoning_legend(ax, zoning_cats, zone_colors,
                           loc=zoning_legend_loc, title=legend_title)
 
@@ -496,6 +503,7 @@ def make_poster(
         )
 
     # --- Save outputs ---
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     if save_full:
         logger.info(f"Saving full-resolution to {save_path} at {dpi} DPI...")
         fig.savefig(save_path, dpi=dpi, facecolor=fig.get_facecolor(),
@@ -527,7 +535,9 @@ if __name__ == "__main__":
     parser.add_argument("--center-lat", type=float, default=37.785,
                         help="Map center latitude (default: 37.785)")
     parser.add_argument("--palette", type=str, default="earthy",
-                        help="Color palette (default: earthy)")
+                        choices=sorted(PALETTES.keys()) + ["transparent"],
+                        help="Color palette (default: earthy). "
+                             "'transparent' disables neighborhood coloring.")
     parser.add_argument("--max-colors", type=int, default=8,
                         help="Max colors for graph coloring (default: 8)")
     parser.add_argument("--no-neighborhood-labels", action="store_true", default=False,
@@ -568,10 +578,14 @@ if __name__ == "__main__":
     parser.add_argument("--contour-alpha", type=float, default=0.45,
                         help="Contour opacity (default: 0.45)")
     # Zoning arguments
-    parser.add_argument("--show-zoning", action="store_true", default=False,
-                        help="Enable zoning districts overlay")
+    parser.add_argument("--show-zoning", action="store_true", default=True,
+                        dest="show_zoning",
+                        help="Enable zoning districts overlay (default: enabled)")
+    parser.add_argument("--no-show-zoning", action="store_false", dest="show_zoning",
+                        help="Disable zoning districts overlay")
     parser.add_argument("--show-land-use", action="store_true", default=False,
-                        help="Enable land use overlay")
+                        help="Enable parcel-level land use overlay "
+                             "(takes precedence over --show-zoning)")
     parser.add_argument("--zoning-alpha", type=float, default=0.8,
                         help="Zoning overlay opacity (default: 0.8)")
     parser.add_argument("--no-zoning-legend", action="store_true", default=False,
@@ -636,3 +650,12 @@ if __name__ == "__main__":
         show_attribution=not args.no_attribution,
         save_full=args.save_full,
     )
+
+    # Nudge users toward optional layers they might not know about.
+    # Zoning is on by default, so suggest alternatives.
+    if not args.show_land_use and not args.park_labels and not args.bridge_labels:
+        logger.info(
+            "Tip: try --show-land-use (parcel-level, finer than zoning), "
+            "--park-labels, --bridge-labels, or --no-show-zoning for a "
+            "neighborhood-only view. Run with --help for the full flag list."
+        )

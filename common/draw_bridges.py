@@ -21,6 +21,7 @@ def _cable_height(t, towers, peak_h):
     """Compute catenary cable height at fractional position t along the bridge."""
     a = 2.0
     def _catenary_rise(s, h_target):
+        """Normalized cosh curve from 0 at s=0 to h_target at s=1."""
         return h_target * (np.cosh(a * s) - 1) / (np.cosh(a) - 1)
     pts = [(0.0, 0.0)] + list(towers) + [(1.0, 0.0)]
     for i in range(len(pts) - 1):

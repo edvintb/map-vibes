@@ -15,28 +15,27 @@ Layers (bottom to top):
 Output: 18x18 inch poster at 600 DPI (TIFF) + 200 DPI preview (PNG).
 """
 
-import os, sys
+import os
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 os.chdir(Path(__file__).resolve().parent)
 
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
 import json
 import logging
 
-from process_neighborhoods import (
-    parse_neighborhoods,
-    add_smart_neighborhood_labels,
-    add_neighborhood_borders,
-)
-from process_terrain import add_hillshade
+import matplotlib.pyplot as plt
 from make_map import add_bridges, add_geographic_labels
-from colors import BG_COLOR
+
+from common.colors import BG_COLOR
+from common.process_neighborhoods import (
+    add_neighborhood_borders,
+    add_smart_neighborhood_labels,
+    parse_neighborhoods,
+)
+from common.process_terrain import add_hillshade
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,7 +55,7 @@ def make_topo_map(
     """Generate a gray-hillshade topographic poster of San Francisco."""
 
     logger.info("Loading data...")
-    with open(neighborhoods_file, "r") as f:
+    with open(neighborhoods_file) as f:
         neighborhoods = parse_neighborhoods(json.load(f))
 
     # --- Figure and axes ---
@@ -101,6 +100,7 @@ def make_topo_map(
     )
 
     # --- Save ---
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     logger.info(f"Saving to {save_path} at {dpi} DPI...")
     fig.savefig(save_path, dpi=dpi, facecolor=fig.get_facecolor())
     logger.info(f"Done — {save_path}")

@@ -1,19 +1,20 @@
 import colorsys
 import logging
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
-import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-import matplotlib.patches as patches
-from matplotlib.collections import PatchCollection
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from shapely.strtree import STRtree
+
 import matplotlib.cm as cm
+import matplotlib.patches as patches
 import numpy as np
-from matplotlib.path import Path
-from shapely.geometry import Polygon as ShapelyPolygon
-from matplotlib.text import TextPath
+from matplotlib.axes import Axes
+from matplotlib.collections import PatchCollection
 from matplotlib.patches import PathPatch
-from matplotlib.transforms import IdentityTransform, Affine2D
+from matplotlib.text import TextPath
+from matplotlib.transforms import Affine2D, IdentityTransform
 
 sf_map_data_url: str = "https://data.sfgov.org/resource/gfpk-269f.json"
 
@@ -24,13 +25,14 @@ class GeometryType(Enum):
 
 @dataclass
 class Geometry:
+    """GeoJSON-like MultiPolygon geometry with (lon, lat) tuple coordinates."""
     type: GeometryType
-    coordinates: List[List[List[Tuple[float, float]]]]  # Simplified: innermost level is (longitude, latitude)
+    coordinates: list[list[list[tuple[float, float]]]]  # Simplified: innermost level is (longitude, latitude)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Geometry':
+    def from_dict(cls, data: dict[str, Any]) -> 'Geometry':
         # Convert coordinate lists to tuples at the innermost level
-        def convert_coordinates(coords) -> List[List[List[Tuple[float, float]]]]:
+        def convert_coordinates(coords) -> list[list[list[tuple[float, float]]]]:
             result = []
             for polygon in coords:  # Each polygon in the MultiPolygon
                 polygon_rings = []
@@ -49,23 +51,24 @@ class Geometry:
 
 @dataclass
 class Neighborhood:
+    """One named neighborhood polygon (from SF Find Neighborhoods / NYC NTAs)."""
     name: str
-    link: Optional[str]
+    link: str | None
     geometry: Geometry
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Neighborhood':
+    def from_dict(cls, data: dict[str, Any]) -> 'Neighborhood':
         return cls(
             name=data['name'],
             link=data.get('link'),  # Using get() in case link is missing
             geometry=Geometry.from_dict(data['the_geom'])
         )
 
-def parse_neighborhoods(json_data: List[Dict[str, Any]]) -> List[Neighborhood]:
+def parse_neighborhoods(json_data: list[dict[str, Any]]) -> list[Neighborhood]:
     """Parse a list of neighborhood JSON data into Neighborhood objects"""
     return [Neighborhood.from_dict(item) for item in json_data]
 
-def find_adjacent_neighborhoods(neighborhoods: List[Neighborhood], logger=None) -> Dict[int, List[int]]:
+def find_adjacent_neighborhoods(neighborhoods: list[Neighborhood], logger=None) -> dict[int, list[int]]:
     """
     Find which neighborhoods are adjacent (share a boundary or are very close).
     Returns a dictionary mapping neighborhood index to list of adjacent neighborhood indices.
@@ -82,7 +85,7 @@ def find_adjacent_neighborhoods(neighborhoods: List[Neighborhood], logger=None) 
     shapely_polygons = []
     centroids = []
 
-    for i, neighborhood in enumerate(neighborhoods):
+    for _i, neighborhood in enumerate(neighborhoods):
         # Combine all polygons in the MultiPolygon into one
         polygons = []
         for polygon_coords in neighborhood.geometry.coordinates:
@@ -94,7 +97,7 @@ def find_adjacent_neighborhoods(neighborhoods: List[Neighborhood], logger=None) 
                         poly = Polygon(coords)
                         if poly.is_valid:
                             polygons.append(poly)
-                    except:
+                    except Exception:
                         continue
 
         if polygons:
@@ -107,7 +110,7 @@ def find_adjacent_neighborhoods(neighborhoods: List[Neighborhood], logger=None) 
                 else:
                     shapely_polygons.append(None)
                     centroids.append(None)
-            except:
+            except Exception:
                 shapely_polygons.append(None)
                 centroids.append(None)
         else:
@@ -176,9 +179,9 @@ def find_adjacent_neighborhoods(neighborhoods: List[Neighborhood], logger=None) 
 
     return adjacency_dict
 
-def color_neighborhoods_greedy(adjacency_dict: Dict[int, List[int]], num_neighborhoods: int,
-                             force_more_colors: bool = False, max_colors: Optional[int] = None,
-                             logger=None, seed: int = 0) -> List[int]:
+def color_neighborhoods_greedy(adjacency_dict: dict[int, list[int]], num_neighborhoods: int,
+                             force_more_colors: bool = False, max_colors: int | None = None,
+                             logger=None, seed: int = 0) -> list[int]:
     """
     Color neighborhoods using randomized graph coloring.
     Processes neighborhoods in random order and assigns a random valid color.
@@ -301,9 +304,7 @@ def create_distinct_colors(n, palette='earthy'):
         saturation = 0.35 + (i % 3) * 0.15
         value = 0.65 + (i % 4) * 0.08
         rgb = colorsys.hsv_to_rgb(hue, saturation, value)
-        hex_color = '#{:02x}{:02x}{:02x}'.format(
-            int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255)
-        )
+        hex_color = f'#{int(rgb[0] * 255):02x}{int(rgb[1] * 255):02x}{int(rgb[2] * 255):02x}'
         base_colors.append(hex_color)
 
     return base_colors[:n]
@@ -384,26 +385,26 @@ def calculate_optimal_font_size(text, bounds, base_font_size=8):
 def fit_text_to_polygon(text, polygon_coords, min_font_size=5, max_font_size=16):
     """
     Intelligently fit text into a polygon.
-    
+
     Args:
         text: The text to fit
         polygon_coords: List of (x,y) coordinates defining the polygon
         min_font_size: Minimum acceptable font size
         max_font_size: Maximum font size to try
-        
+
     Returns:
         tuple: (formatted_text, centroid, font_size)
     """
     # Get polygon bounds and centroid
     bounds = get_polygon_bounds(polygon_coords)
     centroid = get_polygon_centroid(polygon_coords)
-    
+
     if not bounds or not centroid:
         return text, centroid, min_font_size
-    
+
     # Calculate aspect ratio of the polygon
     aspect_ratio = bounds['width'] / bounds['height'] if bounds['height'] > 0 else 1
-    
+
     # Determine optimal line length based on aspect ratio
     if aspect_ratio > 1.5:  # Wide polygon
         target_chars_per_line = max(5, min(15, len(text) // 2))
@@ -411,14 +412,14 @@ def fit_text_to_polygon(text, polygon_coords, min_font_size=5, max_font_size=16)
         target_chars_per_line = max(3, min(8, len(text) // 3))
     else:  # Roughly square
         target_chars_per_line = max(5, min(10, len(text) // 2))
-    
+
     # Split text into words
     words = text.split()
-    
+
     # Format text with line breaks
     formatted_text = ""
     current_line = ""
-    
+
     for word in words:
         test_line = current_line + " " + word if current_line else word
         if len(test_line) <= target_chars_per_line:
@@ -426,26 +427,26 @@ def fit_text_to_polygon(text, polygon_coords, min_font_size=5, max_font_size=16)
         else:
             formatted_text += current_line + "\n"
             current_line = word
-    
+
     # Add the last line
     if current_line:
         formatted_text += current_line
-    
+
     # Calculate optimal font size based on polygon size
     # Rough estimate: 1 degree of longitude/latitude ≈ 111km at equator
     # We want text to take up about 70% of the polygon's smaller dimension
     min_dimension = min(bounds['width'], bounds['height'])
-    
+
     # Scale factor: 0.01 degrees ≈ reasonable text size for a medium neighborhood
     # This is a heuristic that can be adjusted
     optimal_font_size = min_dimension * 300  # Scale factor
 
     # Constrain to min/max font size
     font_size = max(min_font_size, min(max_font_size, optimal_font_size))
-    
+
     # Round to nearest 0.5
     font_size = round(font_size * 2) / 2
-    
+
     return formatted_text, centroid, font_size
 
 def add_smart_neighborhood_labels(ax, neighborhoods, neighborhood_colors, cmap, logger=None,
@@ -482,7 +483,7 @@ def add_smart_neighborhood_labels(ax, neighborhoods, neighborhood_colors, cmap, 
 
     stroke_width = 2 * font_scale
 
-    for i, neighborhood, _, polygon in neighborhood_data[:max_labels]:
+    for _i, neighborhood, _, polygon in neighborhood_data[:max_labels]:
         # Get optimally formatted text and position
         display_name = neighborhood.name
         formatted_text, centroid, font_size = fit_text_to_polygon(display_name, polygon)
@@ -523,7 +524,7 @@ def add_neighborhood_labels_as_paths(ax, neighborhoods, neighborhood_colors, cma
     neighborhood_data.sort(key=lambda x: x[2], reverse=True)
     max_labels = min(len(neighborhoods), 50)
 
-    for i, neighborhood, _, best_centroid in neighborhood_data[:max_labels]:
+    for _i, neighborhood, _, best_centroid in neighborhood_data[:max_labels]:
         display_name = neighborhood.name
         if len(display_name) > 20:
             display_name = display_name[:17] + "..."
@@ -546,7 +547,7 @@ def add_neighborhood_labels_as_paths(ax, neighborhoods, neighborhood_colors, cma
 
 def setup_logger(level=logging.INFO):
     """Configure the sf_neighborhood logger with the specified level.
-    
+
     Args:
         level: Logging level (e.g., logging.INFO, logging.DEBUG, etc.)
               or string ('INFO', 'DEBUG', etc.)
@@ -554,24 +555,24 @@ def setup_logger(level=logging.INFO):
     # Convert string level to numeric if needed
     if isinstance(level, str):
         level = getattr(logging, level.upper(), logging.INFO)
-    
+
     # Remove existing handlers to avoid duplicates
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
-    
+
     # Add a console handler with the specified level
     handler = logging.StreamHandler()
     handler.setLevel(level)
     formatter = logging.Formatter('%(levelname)s: %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    
+
     # Set the logger level
     logger.setLevel(level)
-    
+
     # Prevent propagation to root logger to avoid duplicate messages
     logger.propagate = False
-    
+
     return logger
 
 # Create a module-level logger
@@ -581,10 +582,10 @@ logger = logging.getLogger('sf_neighborhood')
 setup_logger()
 
 def visualize_neighborhoods(
-        neighborhoods: List[Neighborhood],
+        neighborhoods: list[Neighborhood],
         ax: Axes,
         use_adjacency_coloring: bool = True,
-        max_colors: Optional[int] = None,
+        max_colors: int | None = None,
         show_labels: bool = True
 ) -> Axes:
     """
@@ -596,7 +597,7 @@ def visualize_neighborhoods(
         use_adjacency_coloring: If True, use graph coloring to ensure adjacent neighborhoods have different colors
         max_colors: Maximum number of colors to use (None for unlimited, minimum 4 recommended)
         show_labels: If True, add neighborhood names scaled to fit within polygons
-        
+
     Returns:
         matplotlib axis object
     """
@@ -623,6 +624,7 @@ def visualize_neighborhoods(
 
         # Create a custom colormap
         def custom_cmap(x):
+            """Map x in [0, 1] to an RGB tuple from the discrete palette."""
             if num_colors_to_use == 1:
                 return distinct_colors[0]
             color_idx = int(x * (num_colors_to_use - 1))
@@ -694,9 +696,9 @@ def visualize_neighborhoods(
     return ax
 
 
-def get_neighborhood_color_map(neighborhoods: List[Neighborhood],
+def get_neighborhood_color_map(neighborhoods: list[Neighborhood],
                                max_colors: int = 8,
-                               palette: str = 'earthy') -> Tuple[dict, list]:
+                               palette: str = 'earthy') -> tuple[dict, list]:
     """
     Generate a color map for neighborhoods using graph coloring.
 
@@ -747,7 +749,7 @@ def add_neighborhood_fills(ax, neighborhoods, color_map, alpha=0.3,
     ax.add_collection(coll)
 
 
-def build_neighborhood_index(neighborhoods: List[Neighborhood]) -> Tuple[list, list, 'STRtree']:
+def build_neighborhood_index(neighborhoods: list[Neighborhood]) -> tuple[list, list, 'STRtree']:
     """
     Build Shapely polygons and an STRtree spatial index for neighborhoods.
 

@@ -1,7 +1,7 @@
 [project]
-name = "sfmaps"
+name = "mapvibes"
 version = "0.1.0"
-description = "Poster-quality map of San Francisco"
+description = "Poster-quality maps of San Francisco and Manhattan"
 requires-python = ">=3.11"
 dependencies = [
     "matplotlib>=3.8",
@@ -17,10 +17,16 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = [
-    "process_elevation",
-    "process_neighborhoods",
-    "process_streets",
-    "process_terrain",
-    "process_zoning",
+packages = ["common"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # long lines — many matplotlib text blocks exceed line length
+    "E402",  # imports after chdir — required for our entry-point pattern
+    "B008",  # function calls in defaults — matplotlib patterns
 ]

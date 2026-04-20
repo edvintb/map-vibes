@@ -17,14 +17,15 @@ PatchCollections with hillshade terrain shading.
 import json
 import logging
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 import matplotlib.patches as mpatches
+import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.collections import PatchCollection
-from shapely.geometry import shape as shapely_shape, Polygon, MultiPolygon
-from colors import darken_hex as _darken_hex
+from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import shape as shapely_shape
+
+from .colors import darken_hex as _darken_hex
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class ZoneCategory(Enum):
+    """Normalized zoning/land-use category. Cross-city: SF + NYC source data
+    both map into this enum so the rendering and legend code stays shared."""
     RESIDENTIAL = "Residential"
     COMMERCIAL = "Commercial"
     INDUSTRIAL = "Industrial"
@@ -51,7 +54,7 @@ class ZoneCategory(Enum):
     VACANT = "Vacant"
 
 
-DEFAULT_ZONE_COLORS: Dict[ZoneCategory, str] = {
+DEFAULT_ZONE_COLORS: dict[ZoneCategory, str] = {
     ZoneCategory.RESIDENTIAL: "#C06830",
     ZoneCategory.COMMERCIAL:  "#1E7898",
     ZoneCategory.INDUSTRIAL:  "#786050",
@@ -73,7 +76,7 @@ DEFAULT_ZONE_COLORS: Dict[ZoneCategory, str] = {
 # Category mapping — SF zoning districts (gen field)
 # ---------------------------------------------------------------------------
 
-SF_ZONING_MAP: Dict[str, ZoneCategory] = {
+SF_ZONING_MAP: dict[str, ZoneCategory] = {
     "Residential":  ZoneCategory.RESIDENTIAL,
     "Commercial":   ZoneCategory.COMMERCIAL,
     "Industrial":   ZoneCategory.INDUSTRIAL,
@@ -87,7 +90,7 @@ SF_ZONING_MAP: Dict[str, ZoneCategory] = {
 # Category mapping — SF land use (landuse field)
 # ---------------------------------------------------------------------------
 
-SF_LAND_USE_MAP: Dict[str, ZoneCategory] = {
+SF_LAND_USE_MAP: dict[str, ZoneCategory] = {
     "RESIDENT":    ZoneCategory.RESIDENTIAL,
     "RETAIL/ENT":  ZoneCategory.COMMERCIAL,
     "VISITOR":     ZoneCategory.COMMERCIAL,
@@ -107,7 +110,7 @@ _SF_LAND_USE_SKIP = {"VACANT", "MISSING DATA", ""}
 # Category mapping — NYC zoning districts (ZONEDIST field)
 # ---------------------------------------------------------------------------
 
-def _classify_nyc_zonedist(zonedist: str) -> Optional[ZoneCategory]:
+def _classify_nyc_zonedist(zonedist: str) -> ZoneCategory | None:
     """Classify a NYC ZONEDIST string into a ZoneCategory."""
     if not zonedist:
         return None
@@ -137,14 +140,14 @@ def _classify_nyc_zonedist(zonedist: str) -> Optional[ZoneCategory]:
 
 def _load_socrata_zoning(
     path: str, geom_key: str, category_key: str,
-    category_map: Dict[str, ZoneCategory],
-    skip_values: Optional[set] = None,
-) -> Dict[ZoneCategory, List]:
+    category_map: dict[str, ZoneCategory],
+    skip_values: set | None = None,
+) -> dict[ZoneCategory, list]:
     """Load SF Socrata JSON, return {ZoneCategory: [shapely geom, ...]}."""
-    with open(path, "r") as f:
+    with open(path) as f:
         records = json.load(f)
 
-    result: Dict[ZoneCategory, List] = {cat: [] for cat in ZoneCategory}
+    result: dict[ZoneCategory, list] = {cat: [] for cat in ZoneCategory}
     skipped = 0
 
     for record in records:
@@ -177,12 +180,12 @@ def _load_socrata_zoning(
 # Data loading — GeoJSON (NYC)
 # ---------------------------------------------------------------------------
 
-def _load_geojson_zoning(path: str, classify_fn) -> Dict[ZoneCategory, List]:
+def _load_geojson_zoning(path: str, classify_fn) -> dict[ZoneCategory, list]:
     """Load GeoJSON FeatureCollection, return {ZoneCategory: [shapely geom, ...]}."""
-    with open(path, "r") as f:
+    with open(path) as f:
         data = json.load(f)
 
-    result: Dict[ZoneCategory, List] = {cat: [] for cat in ZoneCategory}
+    result: dict[ZoneCategory, list] = {cat: [] for cat in ZoneCategory}
     for feat in data.get("features", []):
         props = feat.get("properties", {})
         category = classify_fn(props)
@@ -205,9 +208,9 @@ def _load_geojson_zoning(path: str, classify_fn) -> Dict[ZoneCategory, List]:
     return result
 
 
-def _load_geojson_single_layer(path: str) -> List:
+def _load_geojson_single_layer(path: str) -> list:
     """Load a GeoJSON FeatureCollection as a flat list of Shapely geometries."""
-    with open(path, "r") as f:
+    with open(path) as f:
         data = json.load(f)
 
     geoms = []
@@ -233,9 +236,9 @@ def _load_geojson_single_layer(path: str) -> List:
 # ---------------------------------------------------------------------------
 
 def _build_color_source(
-    data: Dict[ZoneCategory, List],
-    zone_colors: Optional[Dict[ZoneCategory, str]] = None,
-) -> Tuple[Dict[str, List], List[ZoneCategory]]:
+    data: dict[ZoneCategory, list],
+    zone_colors: dict[ZoneCategory, str] | None = None,
+) -> tuple[dict[str, list], list[ZoneCategory]]:
     """Convert categorized data to a color_source dict for add_hillshade.
 
     Returns (color_source, categories_present) where:
@@ -245,7 +248,7 @@ def _build_color_source(
     if zone_colors is None:
         zone_colors = DEFAULT_ZONE_COLORS
 
-    color_source: Dict[str, List] = {}
+    color_source: dict[str, list] = {}
     categories_present = []
 
     for cat in ZoneCategory:
@@ -261,8 +264,8 @@ def _build_color_source(
 
 def load_sf_zoning_color_source(
     path: str = "data/sf_zoning.json",
-    zone_colors: Optional[Dict[ZoneCategory, str]] = None,
-) -> Tuple[Dict[str, List], List[ZoneCategory]]:
+    zone_colors: dict[ZoneCategory, str] | None = None,
+) -> tuple[dict[str, list], list[ZoneCategory]]:
     """Load SF zoning districts and return color_source for add_hillshade."""
     logger.info("Loading SF zoning districts...")
     data = _load_socrata_zoning(path, "the_geom", "gen", SF_ZONING_MAP)
@@ -271,8 +274,8 @@ def load_sf_zoning_color_source(
 
 def load_sf_land_use_color_source(
     path: str = "data/sf_land_use.json",
-    zone_colors: Optional[Dict[ZoneCategory, str]] = None,
-) -> Tuple[Dict[str, List], List[ZoneCategory]]:
+    zone_colors: dict[ZoneCategory, str] | None = None,
+) -> tuple[dict[str, list], list[ZoneCategory]]:
     """Load SF land use parcels and return color_source for add_hillshade."""
     logger.info("Loading SF land use...")
     data = _load_socrata_zoning(
@@ -284,8 +287,8 @@ def load_sf_land_use_color_source(
 
 def load_nyc_zoning_color_source(
     path: str = "data/manhattan_zoning.json",
-    zone_colors: Optional[Dict[ZoneCategory, str]] = None,
-) -> Tuple[Dict[str, List], List[ZoneCategory]]:
+    zone_colors: dict[ZoneCategory, str] | None = None,
+) -> tuple[dict[str, list], list[ZoneCategory]]:
     """Load NYC zoning districts and return color_source for add_hillshade."""
     logger.info("Loading NYC zoning districts...")
     data = _load_geojson_zoning(
@@ -299,7 +302,7 @@ def load_nyc_zoning_color_source(
 # Category mapping — NYC PLUTO land use (LandUse field, parcel-level)
 # ---------------------------------------------------------------------------
 
-NYC_PLUTO_LAND_USE_MAP: Dict[str, ZoneCategory] = {
+NYC_PLUTO_LAND_USE_MAP: dict[str, ZoneCategory] = {
     "01": ZoneCategory.RESIDENTIAL_LOW,   # One & Two Family Buildings
     "02": ZoneCategory.RESIDENTIAL_MID,   # Multi-Family Walk-Up
     "03": ZoneCategory.RESIDENTIAL_HIGH,  # Multi-Family Elevator
@@ -314,7 +317,7 @@ NYC_PLUTO_LAND_USE_MAP: Dict[str, ZoneCategory] = {
 }
 
 
-def _classify_nyc_pluto(props: dict) -> Optional[ZoneCategory]:
+def _classify_nyc_pluto(props: dict) -> ZoneCategory | None:
     """Classify a PLUTO record by its LandUse code."""
     lu = (props.get("LandUse") or "").strip()
     return NYC_PLUTO_LAND_USE_MAP.get(lu)
@@ -322,8 +325,8 @@ def _classify_nyc_pluto(props: dict) -> Optional[ZoneCategory]:
 
 def load_nyc_land_use_color_source(
     path: str = "data/manhattan_land_use.json",
-    zone_colors: Optional[Dict[ZoneCategory, str]] = None,
-) -> Tuple[Dict[str, List], List[ZoneCategory]]:
+    zone_colors: dict[ZoneCategory, str] | None = None,
+) -> tuple[dict[str, list], list[ZoneCategory]]:
     """Load NYC MapPLUTO parcel-level land use and return color_source."""
     logger.info("Loading NYC parcel-level land use (MapPLUTO)...")
     data = _load_geojson_zoning(path, _classify_nyc_pluto)
@@ -335,7 +338,7 @@ def load_nyc_land_use_color_source(
 # ---------------------------------------------------------------------------
 
 
-def _geom_to_patches(geom) -> List[mpatches.Polygon]:
+def _geom_to_patches(geom) -> list[mpatches.Polygon]:
     """Convert a Shapely geometry to matplotlib Polygons."""
     if geom.is_empty:
         return []
@@ -359,7 +362,7 @@ def _geom_to_patches(geom) -> List[mpatches.Polygon]:
 # ---------------------------------------------------------------------------
 
 def add_single_color_overlay(
-    ax: Axes, geoms: List,
+    ax: Axes, geoms: list,
     color: str = "#B8AFA3", alpha: float = 0.35,
     linewidth: float = 0.2, zorder: int = 3,
     label: str = "",
@@ -409,8 +412,8 @@ def add_nyc_commercial_overlay(
 
 def add_zoning_legend(
     ax: Axes,
-    categories: List[ZoneCategory],
-    zone_colors: Optional[Dict[ZoneCategory, str]] = None,
+    categories: list[ZoneCategory],
+    zone_colors: dict[ZoneCategory, str] | None = None,
     loc: str = "upper left",
     fontsize: float = 9.0,
     title: str = "Zoning",

@@ -9,16 +9,16 @@ and matplotlib rendering utilities for contour visualization.
 import json
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 from enum import Enum
 
-import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
-from matplotlib.figure import Figure
 from matplotlib.colors import Normalize
-from colors import darken_rgb as _darken_rgb
+from matplotlib.figure import Figure
+
+from .colors import darken_rgb as _darken_rgb
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class IsolineType(Enum):
 class ElevationLineGeometry:
     """Represents the geometry of an elevation isoline (GeoJSON LineString)."""
     type: str  # Should be "LineString"
-    coordinates: List[List[float]]  # List of [longitude, latitude] pairs
+    coordinates: list[list[float]]  # List of [longitude, latitude] pairs
 
 
 @dataclass
@@ -58,16 +58,16 @@ class ElevationIsoline:
 
     # Elevation information
     elevation: str  # Elevation value as string (e.g., "-25", "100")
-    isoline_ty: Optional[str] = None  # Isoline type (e.g., "800 - Normal")
+    isoline_ty: str | None = None  # Isoline type (e.g., "800 - Normal")
 
     # Geometric properties
-    shape__len: Optional[str] = None  # Shape length as string
+    shape__len: str | None = None  # Shape length as string
 
     # Geometry
-    the_geom: Optional[ElevationLineGeometry] = None
+    the_geom: ElevationLineGeometry | None = None
 
     @property
-    def elevation_value(self) -> Optional[float]:
+    def elevation_value(self) -> float | None:
         """Get elevation as a float value."""
         try:
             return float(self.elevation) if self.elevation else None
@@ -75,7 +75,7 @@ class ElevationIsoline:
             return None
 
     @property
-    def shape_length(self) -> Optional[float]:
+    def shape_length(self) -> float | None:
         """Get shape length as a float value."""
         try:
             return float(self.shape__len) if self.shape__len else None
@@ -83,20 +83,20 @@ class ElevationIsoline:
             return None
 
     @property
-    def coordinates(self) -> List[Tuple[float, float]]:
+    def coordinates(self) -> list[tuple[float, float]]:
         """Get coordinates as a list of (longitude, latitude) tuples."""
         if self.the_geom and self.the_geom.coordinates:
             return [(coord[0], coord[1]) for coord in self.the_geom.coordinates]
         return []
 
     @property
-    def start_coordinate(self) -> Optional[Tuple[float, float]]:
+    def start_coordinate(self) -> tuple[float, float] | None:
         """Get the starting coordinate (longitude, latitude)."""
         coords = self.coordinates
         return coords[0] if coords else None
 
     @property
-    def end_coordinate(self) -> Optional[Tuple[float, float]]:
+    def end_coordinate(self) -> tuple[float, float] | None:
         """Get the ending coordinate (longitude, latitude)."""
         coords = self.coordinates
         return coords[-1] if coords else None
@@ -121,7 +121,7 @@ class ElevationIsoline:
 @dataclass
 class ElevationData:
     """Container for all elevation isoline data."""
-    isolines: List[ElevationIsoline]
+    isolines: list[ElevationIsoline]
 
     def __len__(self) -> int:
         return len(self.isolines)
@@ -144,7 +144,7 @@ class ElevationData:
                 filtered.append(isoline)
         return ElevationData(isolines=filtered)
 
-    def get_elevation_values(self) -> List[float]:
+    def get_elevation_values(self) -> list[float]:
         """Get all unique elevation values, sorted."""
         elevations = set()
         for isoline in self.isolines:
@@ -153,7 +153,7 @@ class ElevationData:
                 elevations.add(elev)
         return sorted(list(elevations))
 
-    def get_elevation_range(self) -> Tuple[Optional[float], Optional[float]]:
+    def get_elevation_range(self) -> tuple[float | None, float | None]:
         """Get the minimum and maximum elevation values."""
         elevations = self.get_elevation_values()
         if not elevations:
@@ -166,7 +166,7 @@ class ElevationData:
                    if isoline.isoline_ty == isoline_type]
         return ElevationData(isolines=filtered)
 
-    def get_isoline_types(self) -> List[str]:
+    def get_isoline_types(self) -> list[str]:
         """Get all unique isoline types."""
         types = set()
         for isoline in self.isolines:
@@ -179,7 +179,7 @@ class ElevationData:
 # Loading functions
 # ---------------------------------------------------------------------------
 
-def load_elevation_from_json(json_data: List[dict]) -> ElevationData:
+def load_elevation_from_json(json_data: list[dict]) -> ElevationData:
     """Load elevation data from parsed JSON (list of dicts)."""
     isolines = []
     for isoline_dict in json_data:
@@ -205,7 +205,7 @@ def load_elevation_from_json(json_data: List[dict]) -> ElevationData:
 
 def load_elevation_from_file(filename: str) -> ElevationData:
     """Load elevation data from a JSON file."""
-    with open(filename, 'r') as f:
+    with open(filename) as f:
         json_data = json.load(f)
     return load_elevation_from_json(json_data)
 
@@ -233,7 +233,7 @@ ISOLINE_TYPE_COLORS = {
 }
 
 
-def get_elevation_color(elevation_value: Optional[float],
+def get_elevation_color(elevation_value: float | None,
                        colormap: str = DEFAULT_ELEVATION_COLORMAP) -> str:
     """Get color for an elevation value based on a colormap."""
     if elevation_value is None:
@@ -249,14 +249,10 @@ def get_elevation_color(elevation_value: Optional[float],
         cmap = cm.get_cmap(colormap)
     rgba = cmap(normalized)
 
-    return '#{:02x}{:02x}{:02x}'.format(
-        int(rgba[0] * 255),
-        int(rgba[1] * 255),
-        int(rgba[2] * 255)
-    )
+    return f'#{int(rgba[0] * 255):02x}{int(rgba[1] * 255):02x}{int(rgba[2] * 255):02x}'
 
 
-def get_elevation_color_by_range(elevation_value: Optional[float]) -> str:
+def get_elevation_color_by_range(elevation_value: float | None) -> str:
     """Get color for an elevation value based on predefined ranges."""
     if elevation_value is None:
         return '#808080'
@@ -281,7 +277,7 @@ def get_elevation_color_by_range(elevation_value: Optional[float]) -> str:
 
 def add_isoline_to_axis(ax: Axes,
                        isoline: ElevationIsoline,
-                       color: Optional[str] = None,
+                       color: str | None = None,
                        linewidth: float = 1.0,
                        alpha: float = 0.8,
                        style: str = 'solid',
@@ -315,14 +311,14 @@ def add_isoline_to_axis(ax: Axes,
 
 
 def add_isolines_to_axis(ax: Axes,
-                        isolines: List[ElevationIsoline],
-                        color: Optional[str] = None,
+                        isolines: list[ElevationIsoline],
+                        color: str | None = None,
                         color_by: str = 'elevation',
                         linewidth: float = 0.8,
                         alpha: float = 0.7,
                         colormap: str = DEFAULT_ELEVATION_COLORMAP,
-                        filter_elevation_range: Optional[Tuple[float, float]] = None,
-                        filter_isoline_type: Optional[str] = None,
+                        filter_elevation_range: tuple[float, float] | None = None,
+                        filter_isoline_type: str | None = None,
                         **kwargs) -> Axes:
     """Add multiple elevation isolines to a matplotlib axis efficiently."""
     if not isolines:
@@ -399,15 +395,15 @@ def add_isolines_to_axis(ax: Axes,
 
 
 def visualize_elevation_data(elevation_data: ElevationData,
-                           figsize: Tuple[int, int] = (12, 10),
+                           figsize: tuple[int, int] = (12, 10),
                            color_by: str = 'elevation',
                            linewidth: float = 0.6,
                            alpha: float = 0.7,
                            colormap: str = DEFAULT_ELEVATION_COLORMAP,
-                           filter_elevation_range: Optional[Tuple[float, float]] = None,
-                           filter_isoline_type: Optional[str] = None,
+                           filter_elevation_range: tuple[float, float] | None = None,
+                           filter_isoline_type: str | None = None,
                            title: str = "San Francisco Elevation Contours",
-                           save_path: Optional[str] = None,
+                           save_path: str | None = None,
                            dpi: int = 150,
                            **kwargs) -> Figure:
     """Create a complete visualization of elevation data."""
@@ -490,7 +486,7 @@ def create_elevation_legend(ax: Axes, color_by: str = 'elevation') -> None:
 def visualize_elevation_by_range(elevation_data: ElevationData,
                                min_elevation: float,
                                max_elevation: float,
-                               **kwargs) -> Optional[Figure]:
+                               **kwargs) -> Figure | None:
     """Visualize isolines in a specific elevation range."""
     filtered_data = elevation_data.filter_by_elevation_range(min_elevation, max_elevation)
 
@@ -504,7 +500,7 @@ def visualize_elevation_by_range(elevation_data: ElevationData,
 
 def visualize_elevation_by_type(elevation_data: ElevationData,
                               isoline_type: str,
-                              **kwargs) -> Optional[Figure]:
+                              **kwargs) -> Figure | None:
     """Visualize isolines of a specific type."""
     filtered_data = elevation_data.get_isolines_by_type(isoline_type)
 
@@ -529,7 +525,7 @@ def _elevation_tint(hex_color: str, t: float):
     import colorsys
     h_hex = hex_color.lstrip('#')
     r, g, b = (int(h_hex[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    h, _lightness, _sat = colorsys.rgb_to_hls(r, g, b)
     return colorsys.hls_to_rgb(h, 0.68 - 0.53 * t, 0.40 + 0.45 * t)
 
 
@@ -601,9 +597,9 @@ def add_contour_lines(
     alpha: float = 0.45,
     show_minor: bool = True,
     show_major: bool = True,
-    color_override: Optional[str] = None,
+    color_override: str | None = None,
     contour_style: str = "darken",
-    gap_color: Optional[str] = "#B8B7B5",
+    gap_color: str | None = "#B8B7B5",
     clip_boundary=None,
 ):
     """Draw elevation contour lines colored by a unified color index.

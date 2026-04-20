@@ -19,14 +19,13 @@ import json
 import logging
 import os
 import urllib.request
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from constants import PIXELS_PER_DEGREE, DEFAULT_EXTENT, DATA_DIR
+os.chdir(Path(__file__).resolve().parent)
+from common.constants import DATA_DIR, DEFAULT_EXTENT, PIXELS_PER_DEGREE
 
 # City-specific defaults
 CENTER_LON = -122.435
@@ -141,6 +140,7 @@ def download_dem(center_lon, center_lat, extent):
 # ---------------------------------------------------------------------------
 
 def main():
+    """CLI entry point: fetch all SF data into san_francisco/data/."""
     parser = argparse.ArgumentParser(
         description="Download data for SF poster map",
         formatter_class=argparse.RawDescriptionHelpFormatter,

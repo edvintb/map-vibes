@@ -7,14 +7,14 @@ isolines onto matplotlib axes, optionally clipped to a city boundary.
 """
 
 import logging
+from typing import TYPE_CHECKING
+
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.colors import LinearSegmentedColormap
-from typing import List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from process_elevation import ElevationData
-    from process_neighborhoods import Neighborhood
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -65,8 +65,8 @@ def add_filled_contours(ax: Axes, elevation_data: 'ElevationData',
         grid_res: Grid resolution (pixels per side)
         n_levels: Number of contour levels
     """
-    from scipy.interpolate import griddata
     import shapely
+    from scipy.interpolate import griddata
 
     logger.info("  Building filled contour surface...")
 
@@ -230,7 +230,7 @@ def add_hillshade(ax: Axes, dem_path: str,
     if color_source is not None:
         import matplotlib.patches as mpatches
         from matplotlib.collections import PatchCollection
-        from shapely.geometry import Polygon, MultiPolygon
+        from shapely.geometry import MultiPolygon, Polygon
 
         logger.info("    Rendering vector color source...")
         for hex_color, geom_list in color_source.items():

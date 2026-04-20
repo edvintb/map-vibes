@@ -6,18 +6,16 @@ Combines data models (Street, StreetsData) with loading functions
 and matplotlib rendering utilities for street network visualization.
 """
 
-import json
 import logging
-import numpy as np
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict
 from enum import Enum
 
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
-from matplotlib.lines import Line2D
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,7 +56,7 @@ class StreetLayer(Enum):
 class LineGeometry:
     """Represents the geometry of a street line (GeoJSON LineString)."""
     type: str  # Should be "LineString"
-    coordinates: List[List[float]]  # List of [longitude, latitude] pairs
+    coordinates: list[list[float]]  # List of [longitude, latitude] pairs
 
 
 @dataclass
@@ -69,54 +67,54 @@ class Street:
     cnn: str
 
     # Address ranges
-    lf_fadd: Optional[str] = None
-    lf_toadd: Optional[str] = None
-    rt_fadd: Optional[str] = None
-    rt_toadd: Optional[str] = None
+    lf_fadd: str | None = None
+    lf_toadd: str | None = None
+    rt_fadd: str | None = None
+    rt_toadd: str | None = None
 
     # Street names
-    street: Optional[str] = None
-    st_type: Optional[str] = None
-    streetname: Optional[str] = None
-    streetname_gc: Optional[str] = None
-    street_gc: Optional[str] = None
+    street: str | None = None
+    st_type: str | None = None
+    streetname: str | None = None
+    streetname_gc: str | None = None
+    street_gc: str | None = None
 
     # Intersection streets
-    f_st: Optional[str] = None
-    t_st: Optional[str] = None
+    f_st: str | None = None
+    t_st: str | None = None
 
     # Node connections
-    f_node_cnn: Optional[str] = None
-    t_node_cnn: Optional[str] = None
+    f_node_cnn: str | None = None
+    t_node_cnn: str | None = None
 
     # Status flags
-    accepted: Optional[bool] = None
-    active: Optional[bool] = None
+    accepted: bool | None = None
+    active: bool | None = None
 
     # Classification
-    classcode: Optional[str] = None
-    layer: Optional[str] = None
-    jurisdiction: Optional[str] = None
-    oneway: Optional[str] = None
+    classcode: str | None = None
+    layer: str | None = None
+    jurisdiction: str | None = None
+    oneway: str | None = None
 
     # Geographic information
-    nhood: Optional[str] = None
-    analysis_neighborhood: Optional[str] = None
-    supervisor_district: Optional[str] = None
-    zip_code: Optional[str] = None
+    nhood: str | None = None
+    analysis_neighborhood: str | None = None
+    supervisor_district: str | None = None
+    zip_code: str | None = None
 
     # Geometry
-    line: Optional[LineGeometry] = None
+    line: LineGeometry | None = None
 
     # Dates and metadata
-    date_added: Optional[str] = None
-    date_altered: Optional[str] = None
-    date_dropped: Optional[str] = None
-    gds_chg_id_add: Optional[str] = None
-    gds_chg_id_altered: Optional[str] = None
-    gds_chg_id_dropped: Optional[str] = None
-    data_as_of: Optional[str] = None
-    data_loaded_at: Optional[str] = None
+    date_added: str | None = None
+    date_altered: str | None = None
+    date_dropped: str | None = None
+    gds_chg_id_add: str | None = None
+    gds_chg_id_altered: str | None = None
+    gds_chg_id_dropped: str | None = None
+    data_as_of: str | None = None
+    data_loaded_at: str | None = None
 
     @property
     def full_street_name(self) -> str:
@@ -131,20 +129,20 @@ class Street:
             return f"Street {self.cnn}"
 
     @property
-    def coordinates(self) -> List[Tuple[float, float]]:
+    def coordinates(self) -> list[tuple[float, float]]:
         """Get coordinates as a list of (longitude, latitude) tuples."""
         if self.line and self.line.coordinates:
             return [(coord[0], coord[1]) for coord in self.line.coordinates]
         return []
 
     @property
-    def start_coordinate(self) -> Optional[Tuple[float, float]]:
+    def start_coordinate(self) -> tuple[float, float] | None:
         """Get the starting coordinate (longitude, latitude)."""
         coords = self.coordinates
         return coords[0] if coords else None
 
     @property
-    def end_coordinate(self) -> Optional[Tuple[float, float]]:
+    def end_coordinate(self) -> tuple[float, float] | None:
         """Get the ending coordinate (longitude, latitude)."""
         coords = self.coordinates
         return coords[-1] if coords else None
@@ -159,13 +157,13 @@ class Street:
         """Check if the street is both active and accepted."""
         return bool(self.active and self.accepted)
 
-    def get_address_range_left(self) -> Optional[Tuple[str, str]]:
+    def get_address_range_left(self) -> tuple[str, str] | None:
         """Get the left side address range as (from, to) tuple."""
         if self.lf_fadd and self.lf_toadd:
             return (self.lf_fadd, self.lf_toadd)
         return None
 
-    def get_address_range_right(self) -> Optional[Tuple[str, str]]:
+    def get_address_range_right(self) -> tuple[str, str] | None:
         """Get the right side address range as (from, to) tuple."""
         if self.rt_fadd and self.rt_toadd:
             return (self.rt_fadd, self.rt_toadd)
@@ -178,29 +176,29 @@ class Street:
 @dataclass
 class StreetsData:
     """Container for the complete streets dataset."""
-    streets: List[Street]
+    streets: list[Street]
 
-    def filter_by_neighborhood(self, neighborhood: str) -> List[Street]:
+    def filter_by_neighborhood(self, neighborhood: str) -> list[Street]:
         """Filter streets by neighborhood name."""
         return [s for s in self.streets if s.nhood == neighborhood]
 
-    def filter_by_active(self, active: bool = True) -> List[Street]:
+    def filter_by_active(self, active: bool = True) -> list[Street]:
         """Filter streets by active status."""
         return [s for s in self.streets if s.active == active]
 
-    def filter_by_accepted(self, accepted: bool = True) -> List[Street]:
+    def filter_by_accepted(self, accepted: bool = True) -> list[Street]:
         """Filter streets by accepted status."""
         return [s for s in self.streets if s.accepted == accepted]
 
-    def filter_by_layer(self, layer: str) -> List[Street]:
+    def filter_by_layer(self, layer: str) -> list[Street]:
         """Filter streets by layer."""
         return [s for s in self.streets if s.layer == layer]
 
-    def filter_by_street_type(self, street_type: str) -> List[Street]:
+    def filter_by_street_type(self, street_type: str) -> list[Street]:
         """Filter streets by street type."""
         return [s for s in self.streets if s.st_type == street_type]
 
-    def filter_by_classcode(self, classcode: int) -> List[Street]:
+    def filter_by_classcode(self, classcode: int) -> list[Street]:
         """Filter streets by classification code.
 
         Args:
@@ -217,22 +215,22 @@ class StreetsData:
             raise ValueError("classcode must be an integer between 0 and 6")
         return [s for s in self.streets if s.classcode == str(classcode)]
 
-    def get_neighborhoods(self) -> List[str]:
+    def get_neighborhoods(self) -> list[str]:
         """Get a sorted list of unique neighborhoods."""
         neighborhoods = set(s.nhood for s in self.streets if s.nhood)
         return sorted(list(neighborhoods))
 
-    def get_street_types(self) -> List[str]:
+    def get_street_types(self) -> list[str]:
         """Get a sorted list of unique street types."""
         street_types = set(s.st_type for s in self.streets if s.st_type)
         return sorted(list(street_types))
 
-    def get_layers(self) -> List[str]:
+    def get_layers(self) -> list[str]:
         """Get a sorted list of unique layers."""
         layers = set(s.layer for s in self.streets if s.layer)
         return sorted(list(layers))
 
-    def search_by_name(self, name: str, case_sensitive: bool = False) -> List[Street]:
+    def search_by_name(self, name: str, case_sensitive: bool = False) -> list[Street]:
         """Search streets by name (partial match)."""
         if not case_sensitive:
             name = name.lower()
@@ -253,7 +251,7 @@ class StreetsData:
 # Loading functions
 # ---------------------------------------------------------------------------
 
-def load_streets_from_json(json_data: List[dict]) -> StreetsData:
+def load_streets_from_json(json_data: list[dict]) -> StreetsData:
     """Load streets data from parsed JSON (list of dicts)."""
     streets = []
     for street_dict in json_data:
@@ -316,21 +314,21 @@ DEFAULT_ONEWAY_COLORS = {
 }
 
 
-def get_street_color_by_type(street_type: Optional[str]) -> str:
+def get_street_color_by_type(street_type: str | None) -> str:
     """Get color for a street based on its type."""
     if not street_type:
         return DEFAULT_STREET_COLORS['default']
     return DEFAULT_STREET_COLORS.get(street_type, DEFAULT_STREET_COLORS['default'])
 
 
-def get_street_color_by_layer(layer: Optional[str]) -> str:
+def get_street_color_by_layer(layer: str | None) -> str:
     """Get color for a street based on its layer."""
     if not layer:
         return DEFAULT_LAYER_COLORS['default']
     return DEFAULT_LAYER_COLORS.get(layer, DEFAULT_LAYER_COLORS['default'])
 
 
-def get_street_color_by_oneway(oneway: Optional[str]) -> str:
+def get_street_color_by_oneway(oneway: str | None) -> str:
     """Get color for a street based on its oneway direction."""
     if not oneway:
         return DEFAULT_ONEWAY_COLORS['default']
@@ -342,7 +340,7 @@ def get_street_color_by_oneway(oneway: Optional[str]) -> str:
 # ---------------------------------------------------------------------------
 
 def add_street_to_axis(ax: Axes, street: Street,
-                      color: Optional[str] = None,
+                      color: str | None = None,
                       linewidth: float = 1.0,
                       alpha: float = 0.8,
                       style: str = 'solid',
@@ -369,7 +367,7 @@ def add_street_to_axis(ax: Axes, street: Street,
 
 
 def add_street_names_to_axis(ax: Axes,
-                            streets: List[Street],
+                            streets: list[Street],
                             fontsize: float = 8,
                             alpha: float = 0.7) -> None:
     """Add street names at centroids, each name appearing only once."""
@@ -401,8 +399,8 @@ def add_street_names_to_axis(ax: Axes,
 
 
 def add_streets_to_axis(ax: Axes,
-                       streets: List[Street],
-                       color: Optional[str] = None,
+                       streets: list[Street],
+                       color: str | None = None,
                        color_by: str = 'type',
                        linewidth: float = 1.0,
                        alpha: float = 0.8,
@@ -448,14 +446,14 @@ def add_streets_to_axis(ax: Axes,
 
 
 def visualize_streets_data(streets_data: StreetsData,
-                          figsize: Tuple[int, int] = (12, 10),
+                          figsize: tuple[int, int] = (12, 10),
                           color_by: str = 'type',
                           linewidth: float = 0.8,
                           alpha: float = 0.7,
                           filter_active: bool = True,
                           filter_accepted: bool = True,
                           title: str = "San Francisco Streets",
-                          save_path: Optional[str] = None,
+                          save_path: str | None = None,
                           dpi: int = 150,
                           show_names: bool = False,
                           name_fontsize: float = 8,
@@ -491,7 +489,7 @@ def visualize_streets_data(streets_data: StreetsData,
     return fig
 
 
-def group_streets_by_color(streets: List[Street], color_by: str) -> Dict[str, List[Street]]:
+def group_streets_by_color(streets: list[Street], color_by: str) -> dict[str, list[Street]]:
     """Group streets by color for efficient rendering."""
     groups = {}
 
@@ -546,7 +544,7 @@ def calculate_street_length(street: Street, method: str = 'bounding_box') -> flo
         raise ValueError(f"Unknown method: {method}. Use 'bounding_box', 'euclidean', or 'manhattan'")
 
 
-def calculate_streets_lengths(streets: List[Street], method: str = 'bounding_box') -> Dict[str, float]:
+def calculate_streets_lengths(streets: list[Street], method: str = 'bounding_box') -> dict[str, float]:
     """Calculate lengths for multiple streets."""
     lengths = {}
     for street in streets:
@@ -557,8 +555,8 @@ def calculate_streets_lengths(streets: List[Street], method: str = 'bounding_box
     return lengths
 
 
-def find_longest_streets(streets: List[Street], n: int = 10,
-                        method: str = 'bounding_box') -> Tuple[List[Street], List[float]]:
+def find_longest_streets(streets: list[Street], n: int = 10,
+                        method: str = 'bounding_box') -> tuple[list[Street], list[float]]:
     """Find the n longest streets in a list."""
     street_lengths = []
     for street in streets:
@@ -567,12 +565,12 @@ def find_longest_streets(streets: List[Street], n: int = 10,
             street_lengths.append((street, length))
 
     street_lengths.sort(key=lambda x: x[1], reverse=True)
-    streets_out, lengths = zip(*street_lengths[:n])
+    streets_out, lengths = zip(*street_lengths[:n], strict=False)
     return streets_out, lengths
 
 
 def create_street_legend(ax: Axes, color_by: str,
-                        streets: Optional[List[Street]] = None) -> List[Line2D]:
+                        streets: list[Street] | None = None) -> list[Line2D]:
     """Create a legend for the street visualization."""
     if color_by == 'type':
         legend_items = [(k, v) for k, v in DEFAULT_STREET_COLORS.items() if k != 'default']
@@ -594,7 +592,7 @@ def create_street_legend(ax: Axes, color_by: str,
 
 
 def visualize_neighborhood_streets(streets_data: StreetsData, neighborhood: str,
-                                 **kwargs) -> Optional[Figure]:
+                                 **kwargs) -> Figure | None:
     """Visualize streets in a specific neighborhood."""
     neighborhood_streets = streets_data.filter_by_neighborhood(neighborhood)
     if not neighborhood_streets:
@@ -609,7 +607,7 @@ def visualize_neighborhood_streets(streets_data: StreetsData, neighborhood: str,
 
 
 def visualize_streets_by_type(streets_data: StreetsData, street_type: str,
-                             **kwargs) -> Optional[Figure]:
+                             **kwargs) -> Figure | None:
     """Visualize streets of a specific type."""
     type_streets = [s for s in streets_data.streets if s.st_type == street_type]
     if not type_streets:
